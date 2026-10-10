@@ -164,10 +164,11 @@ app.delete('/api/cv/:id', (req, res) => {
 // ---------- Modèles de mail ----------
 app.get('/api/templates', (req, res) => res.json(readJson(TEMPLATES_FILE, [])));
 app.post('/api/templates', (req, res) => {
-  const { name, subject, html } = req.body || {};
+  const { name, html } = req.body || {};
   if (!name) return res.status(400).json({ message: 'Nom du modèle requis.' });
   const list = readJson(TEMPLATES_FILE, []).filter((t) => t.name !== name);
-  list.push({ name, subject: subject || '', html: html || '', updatedAt: new Date().toISOString() });
+  const fields = Object.fromEntries(['subject', 'fromName', 'fromEmail', 'replyTo', 'cc', 'bcc'].map((k) => [k, String(req.body[k] || '')]));
+  list.push({ name, ...fields, html: html || '', updatedAt: new Date().toISOString() });
   writeJson(TEMPLATES_FILE, list);
   res.json(list);
 });
@@ -232,7 +233,7 @@ function htmlToText(html) {
     .trim();
 }
 
-function buildMessage(s, { subject, html, vars, to, cvIds }) {
+function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc }) {
   const filled = fillVars(html, vars, true);
   const wrapped = `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">${filled}</body></html>`;
   const { html: finalHtml, attachments } = inlineImages(wrapped);
@@ -244,6 +245,8 @@ function buildMessage(s, { subject, html, vars, to, cvIds }) {
   return {
     from, to,
     replyTo: s.replyTo || undefined,
+    cc: cc && cc.length ? cc : undefined,
+    bcc: bcc && bcc.length ? bcc : undefined,
     subject: fillVars(subject, vars, false),
     html: finalHtml,
     text: htmlToText(filled),
@@ -256,9 +259,27 @@ const jobs = new Map();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.post('/api/send', (req, res) => {
-  const s = getSettings();
+  const settings = getSettings();
   const { subject, html, recipients, cvIds, testTo } = req.body || {};
   if (!subject || !html) return res.status(400).json({ message: 'Objet et contenu requis.' });
+
+  // En-têtes propres à ce mail ; vides = valeurs des Réglages.
+  const clean = (v) => String(v || '').replace(/[\r\n]+/g, ' ').trim();
+  const splitList = (v) => clean(v).split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  const fromName = clean(req.body.fromName);
+  const fromEmail = clean(req.body.fromEmail);
+  const replyTo = clean(req.body.replyTo);
+  const cc = testTo ? [] : splitList(req.body.cc);
+  const bcc = testTo ? [] : splitList(req.body.bcc);
+  for (const [label, value] of [['De', fromEmail], ['Répondre à', replyTo], ...cc.map((v) => ['Cc', v]), ...bcc.map((v) => ['Cci', v])]) {
+    if (value && !EMAIL_RE.test(value)) return res.status(400).json({ message: `Adresse « ${label} » invalide : ${value}` });
+  }
+  const s = {
+    ...settings,
+    fromName: fromName || settings.fromName,
+    fromEmail: fromEmail || settings.fromEmail,
+    replyTo: replyTo || settings.replyTo,
+  };
   if (!DRY_RUN && (!s.host || !(s.fromEmail || s.user)))
     return res.status(400).json({ message: 'Configurez d\'abord le SMTP dans « Réglages ».' });
 
@@ -290,7 +311,7 @@ app.post('/api/send', (req, res) => {
       if (job.cancelled) break;
       const entry = { email: r.email, entreprise: r.entreprise || r.company || '', at: new Date().toISOString() };
       try {
-        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds }));
+        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc }));
         if (DRY_RUN) {
           // Simulation : le mail est enregistré en .eml (ouvrable dans Thunderbird/Outlook) au lieu d'être envoyé.
           const file = path.join(OUTBOX_DIR, `${Date.now()}_${r.email.replace(/[^\w.@-]/g, '_')}.eml`);

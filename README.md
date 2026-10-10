@@ -5,7 +5,8 @@ Petite plateforme locale pour envoyer votre CV à des recruteurs, avec un mail p
 - Import d'un **CSV** d'adresses RH, ou **saisie manuelle** d'une adresse
 - **Variables** dans l'objet et le message : `{{nom}}`, `{{entreprise}}`, `{{poste}}`… (toute colonne du CSV devient une variable)
 - **Éditeur visuel** (gras, couleurs, listes, liens, **images**) ou **édition HTML directe**, avec aperçu pour chaque destinataire
-- **Pièces jointes** : CV, lettre de motivation…
+- **Pièces jointes** (CV, lettre de motivation…) ajoutées directement en écrivant le mail, bouton 📎 Joindre
+- Champs **De** (nom affiché et adresse), **Répondre à**, **Cc** et **Cci** modifiables pour chaque mail
 - Envoi d'un **mail de test** à soi-même, envoi groupé avec pause entre chaque mail, bouton « Arrêter »
 - **Modèles** de mail réutilisables et **historique** des envois (exportable en CSV)
 
@@ -50,6 +51,16 @@ rh@startup-demo.com;M. Durand;Startup Démo;Développeur web
 
 Les doublons et les adresses invalides sont ignorés à l'import. Les cellules du tableau sont modifiables
 directement, et chaque ligne peut être décochée pour ne pas recevoir le mail.
+
+## Expéditeur (« De »)
+
+Pour chaque mail, vous pouvez changer le nom affiché et l'adresse, par exemple
+`AKAZA Fashion` et `contact@akaza-fashion.fr`. Laissés vides, ce sont ceux de l'onglet « Réglages ».
+
+- Le **nom affiché** peut être ce que vous voulez.
+- L'**adresse** doit être une vraie adresse e-mail (avec `@`), et votre compte d'envoi doit avoir le droit de l'utiliser.
+  Avec Gmail, c'est votre adresse Gmail ou un alias ajouté dans Gmail → Paramètres → Comptes → « Envoyer des e-mails en tant que ».
+  Sinon Gmail remplace l'adresse par la vôtre. Pour une adresse de votre propre domaine, utilisez le SMTP de ce domaine.
 
 ## Images dans le mail
 

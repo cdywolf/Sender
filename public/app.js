@@ -69,14 +69,7 @@ const store = {
 };
 
 let recipients = store.get('recipients', []);
-let selectedCvs = new Set(store.get('selectedCvs', []));
-
-const DEFAULT_SUBJECT = 'Candidature – {{poste}} chez {{entreprise}}';
-const DEFAULT_HTML = `<p>Bonjour {{nom}},</p>
-<p>Je me permets de vous adresser ma candidature pour un poste de <b>{{poste}}</b> au sein de <b>{{entreprise}}</b>.</p>
-<p>Vous trouverez mon CV en pièce jointe. Je serais ravi(e) d'échanger avec vous sur la manière dont je pourrais contribuer à vos projets.</p>
-<p>Je vous remercie par avance pour votre attention et reste disponible pour un entretien.</p>
-<p>Bien cordialement,<br>Votre Prénom Nom<br>06 00 00 00 00</p>`;
+let attachments = store.get('attachments', []); // [{id, name, size}] joints au mail en cours
 
 // ---------- CSV ----------
 function parseCsv(text) {
@@ -226,39 +219,46 @@ $('#clearRecipients').addEventListener('click', async () => {
   if (recipients.length && (await askConfirm('Vider toute la liste des destinataires ?', 'Vider'))) { recipients = []; saveRecipients(); }
 });
 
-// ---------- Pièces jointes ----------
-async function renderCvs(list) {
-  list = list || (await api('/api/cv'));
-  // Le premier fichier ajouté est coché par défaut.
-  if (!selectedCvs.size && list.length) selectedCvs.add(list[0].id);
-  selectedCvs = new Set([...selectedCvs].filter((id) => list.some((f) => f.id === id)));
-  store.set('selectedCvs', [...selectedCvs]);
-  $('#cvList').innerHTML = list.length
-    ? list.map((f) => `<li><label><input type="checkbox" data-cv="${escapeHtml(f.id)}" ${selectedCvs.has(f.id) ? 'checked' : ''}>
-        📎 ${escapeHtml(f.name)} <span class="muted">(${(f.size / 1024).toFixed(0)} Ko)</span></label>
-        <button class="link danger" data-cvdel="${escapeHtml(f.id)}">Supprimer</button></li>`).join('')
-    : '<li class="muted">Aucun fichier. Ajoutez votre CV.</li>';
+// ---------- Pièces jointes (dans l'écriture du mail) ----------
+const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko');
+function renderAttachments() {
+  store.set('attachments', attachments);
+  $('#attachList').innerHTML = attachments
+    .map((f) => `<li title="${escapeHtml(f.name)}">📎 <span class="name">${escapeHtml(f.name)}</span>
+      <span class="muted">${fmtSize(f.size)}</span>
+      <button data-detach="${escapeHtml(f.id)}" aria-label="Retirer ${escapeHtml(f.name)}">✕</button></li>`)
+    .join('');
 }
-$('#cvInput').addEventListener('change', async (e) => {
-  const fd = new FormData();
-  [...e.target.files].forEach((f) => fd.append('files', f));
-  e.target.value = '';
+async function syncAttachments() {
+  // Retire les fichiers qui n'existent plus côté serveur.
   try {
+    const onServer = new Set((await api('/api/cv')).map((f) => f.id));
+    attachments = attachments.filter((f) => onServer.has(f.id));
+  } catch {}
+  renderAttachments();
+}
+$('#attachBtn').addEventListener('click', (e) => { e.preventDefault(); $('#attachInput').click(); });
+$('#attachInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const fd = new FormData();
+  files.forEach((f) => fd.append('files', f));
+  try {
+    const before = new Set(attachments.map((f) => f.id));
     const list = await api('/api/cv', { method: 'POST', body: fd });
-    list.slice(-fd.getAll('files').length).forEach((f) => selectedCvs.add(f.id));
-    renderCvs(list);
-    toast('Fichier ajouté.', 'ok');
+    const added = list.slice(-files.length).filter((f) => !before.has(f.id));
+    attachments.push(...added);
+    renderAttachments();
+    toast(added.length > 1 ? `${added.length} fichiers joints.` : 'Fichier joint.', 'ok');
   } catch (err) { toast(err.message, 'error'); }
 });
-$('#cvList').addEventListener('change', (e) => {
-  const id = e.target.dataset.cv;
+$('#attachList').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-detach]')?.dataset.detach;
   if (!id) return;
-  e.target.checked ? selectedCvs.add(id) : selectedCvs.delete(id);
-  store.set('selectedCvs', [...selectedCvs]);
-});
-$('#cvList').addEventListener('click', async (e) => {
-  const id = e.target.dataset.cvdel;
-  if (id && (await askConfirm('Supprimer ce fichier ?', 'Supprimer'))) renderCvs(await api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }));
+  attachments = attachments.filter((f) => f.id !== id);
+  renderAttachments();
+  api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => {});
 });
 
 // ---------- Éditeur ----------
@@ -266,8 +266,10 @@ const editor = $('#editor');
 const source = $('#htmlSource');
 let mode = 'visual';
 
-editor.innerHTML = store.get('html', DEFAULT_HTML);
-$('#subject').value = store.get('subject', DEFAULT_SUBJECT);
+// Champs d'en-tête du mail (vides par défaut).
+const HEADER_FIELDS = ['fromName', 'fromEmail', 'replyTo', 'cc', 'bcc', 'subject'];
+editor.innerHTML = store.get('html', '');
+HEADER_FIELDS.forEach((id) => { $('#' + id).value = store.get(id, ''); });
 
 const getHtml = () => (mode === 'html' ? source.value : editor.innerHTML);
 function setHtml(html) {
@@ -277,11 +279,11 @@ function setHtml(html) {
 }
 function saveDraft() {
   store.set('html', getHtml());
-  store.set('subject', $('#subject').value);
+  HEADER_FIELDS.forEach((id) => store.set(id, $('#' + id).value));
 }
 editor.addEventListener('input', saveDraft);
 source.addEventListener('input', saveDraft);
-$('#subject').addEventListener('input', saveDraft);
+HEADER_FIELDS.forEach((id) => $('#' + id).addEventListener('input', saveDraft));
 
 function setMode(m) {
   if (mode === 'html' && m !== 'html') editor.innerHTML = source.value;
@@ -416,6 +418,9 @@ function renderPreviewRecipients() {
 function renderPreview() {
   const r = recipients[$('#previewRecipient').value] || { nom: 'Mme Dupont', entreprise: 'Exemple SA', poste: 'Développeur', email: 'rh@exemple.fr' };
   $('#previewSubject').textContent = fillVars($('#subject').value, r, false);
+  const fromName = $('#fromName').value.trim() || settingsCache.fromName || '';
+  const fromEmail = $('#fromEmail').value.trim() || settingsCache.fromEmail || settingsCache.user || '';
+  $('#previewFrom').textContent = fromName ? `${fromName} <${fromEmail}>` : fromEmail || '(adresse des Réglages)';
   $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml(), r, true)}</body>`;
 }
 $('#previewRecipient').addEventListener('change', renderPreview);
@@ -426,7 +431,7 @@ async function loadTemplates(list) {
   templates = list || (await api('/api/templates'));
   const sel = $('#templateSelect');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— Modèles enregistrés —</option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
   sel.value = templates.some((t) => t.name === cur) ? cur : '';
   $('#deleteTemplate').classList.toggle('hidden', !sel.value);
 }
@@ -434,7 +439,7 @@ $('#templateSelect').addEventListener('change', (e) => {
   const t = templates.find((x) => x.name === e.target.value);
   $('#deleteTemplate').classList.toggle('hidden', !t);
   if (!t) return;
-  $('#subject').value = t.subject;
+  HEADER_FIELDS.forEach((id) => { $('#' + id).value = t[id] || ''; });
   setHtml(t.html);
   if (mode === 'html') source.value = formatHtml(t.html);
   toast(`Modèle « ${t.name} » chargé.`);
@@ -442,7 +447,7 @@ $('#templateSelect').addEventListener('change', (e) => {
 $('#saveTemplate').addEventListener('click', async () => {
   const name = await askText('Nom du modèle :', $('#templateSelect').value || '');
   if (!name) return;
-  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, subject: $('#subject').value, html: getHtml() } }));
+  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, html: getHtml(), ...Object.fromEntries(HEADER_FIELDS.map((id) => [id, $('#' + id).value])) } }));
   $('#templateSelect').value = name;
   $('#deleteTemplate').classList.remove('hidden');
   toast('Modèle enregistré.', 'ok');
@@ -463,12 +468,16 @@ async function startSend(testTo) {
   const list = recipients.filter((r) => r._on).map(({ _on, ...r }) => r);
   if (!$('#subject').value.trim()) return toast("Renseignez l'objet du mail.", 'error');
   if (!testTo && !list.length) return toast('Aucun destinataire sélectionné.', 'error');
-  if (!selectedCvs.size && !(await askConfirm('Aucune pièce jointe sélectionnée. Envoyer quand même ?', 'Envoyer'))) return;
+  if (!attachments.length && !(await askConfirm("Aucune pièce jointe (CV). Envoyer quand même ?", 'Envoyer'))) return;
   if (!testTo && !(await askConfirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`, 'Envoyer'))) return;
   try {
     const { jobId, total } = await api('/api/send', {
       method: 'POST',
-      body: { subject: $('#subject').value, html, recipients: list, cvIds: [...selectedCvs], testTo: testTo || undefined },
+      body: {
+        subject: $('#subject').value, html, recipients: list, cvIds: attachments.map((f) => f.id), testTo: testTo || undefined,
+        fromName: $('#fromName').value.trim(), fromEmail: $('#fromEmail').value.trim(),
+        replyTo: $('#replyTo').value.trim(), cc: $('#cc').value.trim(), bcc: $('#bcc').value.trim(),
+      },
     });
     currentJob = jobId;
     $('#progress').classList.remove('hidden');
@@ -530,15 +539,17 @@ const PRESETS = {
   yahoo: { host: 'smtp.mail.yahoo.com', port: 465, secure: true },
 };
 const form = $('#settingsForm');
+let settingsCache = {};
 async function loadSettings() {
   const s = await api('/api/settings');
+  settingsCache = s;
   for (const [k, v] of Object.entries(s)) {
     const el = form.elements[k];
     if (!el) continue;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
   }
   $('#dryBadge').classList.toggle('hidden', !s.dryRun);
-  if (!$('#testTo').value) $('#testTo').value = store.get('testTo', s.fromEmail || s.user || '');
+  if (!$('#testTo').value) $('#testTo').value = store.get('testTo', '');
 }
 $$('[data-preset]').forEach((b) =>
   b.addEventListener('click', () => {
@@ -568,6 +579,6 @@ $('#testSmtp').addEventListener('click', async () => {
 
 // ---------- Démarrage ----------
 renderRecipients();
-renderCvs();
+syncAttachments();
 loadTemplates();
 loadSettings();

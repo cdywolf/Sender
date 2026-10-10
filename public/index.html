@@ -30,11 +30,11 @@
             <span>Glissez un fichier ici ou cliquez. Une colonne <code>email</code> est requise ;
               les autres colonnes (nom, entreprise, poste…) deviennent des variables.</span>
           </label>
-          <form id="manualForm" class="row wrap">
-            <input type="email" id="mEmail" placeholder="email@entreprise.com" required>
-            <input type="text" id="mNom" placeholder="Nom du recruteur">
-            <input type="text" id="mEntreprise" placeholder="Entreprise">
-            <input type="text" id="mPoste" placeholder="Poste visé">
+          <form id="manualForm" class="row wrap fields">
+            <label class="field">Adresse e-mail <input type="email" id="mEmail" required></label>
+            <label class="field">Nom du recruteur <input type="text" id="mNom"></label>
+            <label class="field">Entreprise <input type="text" id="mEntreprise"></label>
+            <label class="field">Poste visé <input type="text" id="mPoste"></label>
             <button type="submit" class="btn">Ajouter</button>
           </form>
           <div class="row between small">
@@ -50,25 +50,35 @@
           </div>
         </div>
 
-        <div class="card">
-          <h2>2. Pièces jointes (CV, lettre…)</h2>
-          <label class="drop small-drop">
-            <input type="file" id="cvInput" multiple hidden accept=".pdf,.doc,.docx,.odt,.png,.jpg,.jpeg">
-            <strong>Ajouter un fichier</strong> <span>PDF recommandé, 15 Mo max.</span>
-          </label>
-          <ul id="cvList" class="file-list"></ul>
-        </div>
       </div>
 
       <div class="col">
         <div class="card">
-          <h2>3. Message</h2>
+          <h2>2. Message</h2>
           <div class="row wrap">
-            <select id="templateSelect"><option value="">— Modèles enregistrés —</option></select>
+            <label for="templateSelect" class="small muted">Modèle</label>
+            <select id="templateSelect"><option value=""></option></select>
             <button class="btn ghost" id="saveTemplate">Enregistrer comme modèle</button>
             <button class="btn ghost danger hidden" id="deleteTemplate">Supprimer</button>
           </div>
-          <input type="text" id="subject" class="full" placeholder="Objet, ex. : Candidature spontanée – {{poste}} chez {{entreprise}}">
+
+          <div class="headers">
+            <label for="fromName">De</label>
+            <div class="row wrap">
+              <input type="text" id="fromName" aria-label="Nom affiché de l'expéditeur" title="Nom affiché">
+              <input type="email" id="fromEmail" aria-label="Adresse de l'expéditeur" title="Adresse e-mail">
+            </div>
+            <label for="replyTo">Répondre à</label>
+            <input type="email" id="replyTo">
+            <label for="cc">Cc</label>
+            <input type="text" id="cc">
+            <label for="bcc">Cci</label>
+            <input type="text" id="bcc">
+            <label for="subject">Objet</label>
+            <input type="text" id="subject">
+          </div>
+          <p class="muted small">« De » : nom affiché puis adresse. Laissés vides, ce sont ceux des Réglages.
+            Cc et Cci : plusieurs adresses séparées par des virgules ; ils reçoivent une copie de chaque mail envoyé.</p>
 
           <div class="editor-tabs">
             <button class="etab active" data-mode="visual">Éditeur visuel</button>
@@ -93,27 +103,31 @@
             <button id="imgUrlBtn" title="Insérer une image depuis une URL">🌐 Image URL</button>
             <button data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
             <select id="insertVar" title="Insérer une variable"><option value="">{{ }} Variable</option></select>
+            <button id="attachBtn" title="Joindre un fichier (CV, lettre…)">📎 Joindre</button>
             <input type="file" id="imgInput" accept="image/*" hidden>
+            <input type="file" id="attachInput" multiple hidden>
           </div>
 
           <div id="editor" class="editor" contenteditable="true"></div>
-          <textarea id="htmlSource" class="editor code hidden" spellcheck="false"></textarea>
+          <textarea id="htmlSource" class="editor code hidden" spellcheck="false" aria-label="Code HTML du message"></textarea>
           <div id="previewPane" class="hidden">
             <div class="row small">
               <label>Aperçu pour :</label>
               <select id="previewRecipient"></select>
             </div>
-            <div class="preview-subject"><span class="muted">Objet :</span> <strong id="previewSubject"></strong></div>
+            <div class="preview-subject"><span class="muted">De :</span> <span id="previewFrom"></span><br><span class="muted">Objet :</span> <strong id="previewSubject"></strong></div>
             <iframe id="previewFrame" title="Aperçu du mail"></iframe>
           </div>
+          <ul id="attachList" class="attach-list"></ul>
           <p class="muted small">Astuce : utilisez <code>{{nom}}</code>, <code>{{entreprise}}</code>, <code>{{poste}}</code>
             ou toute colonne de votre CSV. Les images importées sont intégrées au mail.</p>
         </div>
 
         <div class="card">
-          <h2>4. Envoi</h2>
+          <h2>3. Envoi</h2>
           <div class="row wrap">
-            <input type="email" id="testTo" placeholder="Votre adresse pour un test">
+            <label for="testTo" class="small muted">Adresse pour le test</label>
+            <input type="email" id="testTo">
             <button class="btn ghost" id="sendTest">Envoyer un test</button>
             <button class="btn primary" id="sendAll">Envoyer à 0 destinataire</button>
           </div>
@@ -151,6 +165,8 @@
   <section id="view-settings" class="view hidden">
     <div class="card narrow">
       <h2>Compte d'envoi (SMTP)</h2>
+      <p class="muted small">Le nom et l'adresse d'expédition servent par défaut ; vous pouvez les changer pour chaque mail dans « Campagne ».
+        Sans adresse d'expédition, c'est l'identifiant qui est utilisé.</p>
       <div class="row wrap">
         <span class="muted small">Préréglages :</span>
         <button class="btn ghost" data-preset="gmail">Gmail</button>
@@ -167,9 +183,9 @@
         <label>Mot de passe d'application <input name="pass" type="password" autocomplete="current-password"></label>
         <p class="muted small">Pour Gmail, créez un « mot de passe d'application » (compte Google → Sécurité →
           Validation en deux étapes → Mots de passe des applications). Votre mot de passe habituel ne fonctionnera pas.</p>
-        <label>Nom affiché <input name="fromName" placeholder="Prénom Nom"></label>
-        <label>Adresse d'expédition <input name="fromEmail" type="email" placeholder="par défaut : l'identifiant"></label>
-        <label>Répondre à (optionnel) <input name="replyTo" type="email"></label>
+        <label>Nom affiché <input name="fromName"></label>
+        <label>Adresse d'expédition <input name="fromEmail" type="email"></label>
+        <label>Répondre à <input name="replyTo" type="email"></label>
         <label>Pause entre deux envois (secondes) <input name="delaySeconds" type="number" min="0"></label>
         <p class="muted small">Une pause de 5 à 15 s limite le risque d'être classé en spam. Gmail limite à environ 500 envois par jour.</p>
         <div class="row">
