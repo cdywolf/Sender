@@ -5,7 +5,8 @@ Petite plateforme locale pour envoyer votre CV à des recruteurs, avec un mail p
 - Import d'un **CSV** d'adresses RH, ou **saisie manuelle** d'une adresse
 - **Variables** dans l'objet et le message : `{{nom}}`, `{{entreprise}}`, `{{poste}}`… (toute colonne du CSV devient une variable)
 - **Éditeur visuel** (gras, couleurs, listes, liens, **images**) ou **édition HTML directe**, avec aperçu pour chaque destinataire
-- **Pièces jointes** : CV, lettre de motivation…
+- **Pièces jointes** (CV, lettre de motivation…) ajoutées directement en écrivant le mail, bouton 📎 Joindre
+- **Identités** comme dans Thunderbird (nom, adresse, serveur d'envoi) à choisir dans « De », plus **Répondre à**, **Cc** et **Cci** pour chaque mail
 - Envoi d'un **mail de test** à soi-même, envoi groupé avec pause entre chaque mail, bouton « Arrêter »
 - **Modèles** de mail réutilisables et **historique** des envois (exportable en CSV)
 
@@ -50,6 +51,25 @@ rh@startup-demo.com;M. Durand;Startup Démo;Développeur web
 
 Les doublons et les adresses invalides sont ignorés à l'import. Les cellules du tableau sont modifiables
 directement, et chaque ligne peut être décochée pour ne pas recevoir le mail.
+
+## Identités (« De »)
+
+Comme dans les paramètres de compte de Thunderbird, l'onglet **Réglages → Identités** permet de créer plusieurs expéditeurs.
+Chaque identité a :
+
+- un **nom affiché** (ex. `AKAZA Fashion`) et une **adresse** (ex. `contact@akaza-fashion.fr`) ;
+- des **Répondre à**, **Cc** et **Cci** par défaut, repris automatiquement quand on la choisit ;
+- un **serveur d'envoi** : le serveur principal, ou un serveur SMTP propre à cette identité.
+- une **signature** (coordonnées, site, téléphone, logo) ajoutée automatiquement sous chaque mail.
+
+Ce que voit le destinataire : le **nom affiché** (libre), l'**adresse** d'envoi, puis la **signature** en bas du mail.
+
+En écrivant le mail, le champ **De** propose vos identités, l'expéditeur par défaut, ou « Autre adresse… » pour une adresse ponctuelle.
+
+L'adresse doit être une vraie adresse e-mail (avec `@`), et le serveur d'envoi doit vous autoriser à l'utiliser, exactement
+comme dans Thunderbird. Avec Gmail, c'est votre adresse Gmail ou un alias ajouté dans Gmail → Paramètres → Comptes →
+« Envoyer des e-mails en tant que » ; sinon Gmail remplace l'adresse par la vôtre. Pour une adresse de votre propre domaine,
+renseignez dans l'identité le serveur SMTP de ce domaine (fourni par votre hébergeur : OVH, IONOS, Google Workspace…).
 
 ## Images dans le mail
 

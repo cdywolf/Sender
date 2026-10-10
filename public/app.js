@@ -24,6 +24,33 @@ function toast(msg, type = '') {
 const escapeHtml = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Boîte de dialogue intégrée à la page (remplace confirm/prompt du navigateur).
+function ask(message, { input = false, value = '', ok = 'OK' } = {}) {
+  return new Promise((resolve) => {
+    const box = $('#dialog');
+    $('#dialogMsg').textContent = message;
+    const field = $('#dialogInput');
+    field.classList.toggle('hidden', !input);
+    field.value = value;
+    $('#dialogOk').textContent = ok;
+    box.classList.remove('hidden');
+    (input ? field : $('#dialogOk')).focus();
+    const close = (result) => {
+      box.classList.add('hidden');
+      $('#dialogOk').onclick = $('#dialogCancel').onclick = field.onkeydown = null;
+      resolve(result);
+    };
+    $('#dialogOk').onclick = () => close(input ? field.value : true);
+    $('#dialogCancel').onclick = () => close(input ? null : false);
+    field.onkeydown = (e) => {
+      if (e.key === 'Enter') close(field.value);
+      if (e.key === 'Escape') close(null);
+    };
+  });
+}
+const askConfirm = (message, ok) => ask(message, { ok });
+const askText = (message, value = '') => ask(message, { input: true, value });
+
 const EMAIL_RE = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/;
 
 // ---------- Navigation ----------
@@ -42,14 +69,7 @@ const store = {
 };
 
 let recipients = store.get('recipients', []);
-let selectedCvs = new Set(store.get('selectedCvs', []));
-
-const DEFAULT_SUBJECT = 'Candidature – {{poste}} chez {{entreprise}}';
-const DEFAULT_HTML = `<p>Bonjour {{nom}},</p>
-<p>Je me permets de vous adresser ma candidature pour un poste de <b>{{poste}}</b> au sein de <b>{{entreprise}}</b>.</p>
-<p>Vous trouverez mon CV en pièce jointe. Je serais ravi(e) d'échanger avec vous sur la manière dont je pourrais contribuer à vos projets.</p>
-<p>Je vous remercie par avance pour votre attention et reste disponible pour un entretien.</p>
-<p>Bien cordialement,<br>Votre Prénom Nom<br>06 00 00 00 00</p>`;
+let attachments = store.get('attachments', []); // [{id, name, size}] joints au mail en cours
 
 // ---------- CSV ----------
 function parseCsv(text) {
@@ -135,14 +155,15 @@ $('#manualForm').addEventListener('submit', (e) => {
   const email = $('#mEmail').value.trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return toast('Adresse e-mail invalide.', 'error');
   if (recipients.some((r) => r.email === email)) return toast('Cette adresse est déjà dans la liste.', 'error');
-  recipients.push({ email, nom: $('#mNom').value.trim(), entreprise: $('#mEntreprise').value.trim(), poste: $('#mPoste').value.trim(), _on: true });
+  recipients.push({ email, _on: true });
   e.target.reset();
   $('#mEmail').focus();
   saveRecipients();
 });
 
 const columns = () => {
-  const cols = new Set(['email', 'nom', 'entreprise', 'poste']);
+  // Les autres colonnes (nom, entreprise…) n'apparaissent que si un CSV les apporte.
+  const cols = new Set(['email']);
   recipients.forEach((r) => Object.keys(r).forEach((k) => k !== '_on' && cols.add(k)));
   return [...cols];
 };
@@ -195,43 +216,50 @@ $('#selectAll').addEventListener('click', () => {
   recipients.forEach((r) => (r._on = !all));
   saveRecipients();
 });
-$('#clearRecipients').addEventListener('click', () => {
-  if (recipients.length && confirm('Vider toute la liste des destinataires ?')) { recipients = []; saveRecipients(); }
+$('#clearRecipients').addEventListener('click', async () => {
+  if (recipients.length && (await askConfirm('Vider toute la liste des destinataires ?', 'Vider'))) { recipients = []; saveRecipients(); }
 });
 
-// ---------- Pièces jointes ----------
-async function renderCvs(list) {
-  list = list || (await api('/api/cv'));
-  // Le premier fichier ajouté est coché par défaut.
-  if (!selectedCvs.size && list.length) selectedCvs.add(list[0].id);
-  selectedCvs = new Set([...selectedCvs].filter((id) => list.some((f) => f.id === id)));
-  store.set('selectedCvs', [...selectedCvs]);
-  $('#cvList').innerHTML = list.length
-    ? list.map((f) => `<li><label><input type="checkbox" data-cv="${escapeHtml(f.id)}" ${selectedCvs.has(f.id) ? 'checked' : ''}>
-        📎 ${escapeHtml(f.name)} <span class="muted">(${(f.size / 1024).toFixed(0)} Ko)</span></label>
-        <button class="link danger" data-cvdel="${escapeHtml(f.id)}">Supprimer</button></li>`).join('')
-    : '<li class="muted">Aucun fichier. Ajoutez votre CV.</li>';
+// ---------- Pièces jointes (dans l'écriture du mail) ----------
+const fmtSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' Mo' : Math.max(1, Math.round(n / 1024)) + ' Ko');
+function renderAttachments() {
+  store.set('attachments', attachments);
+  $('#attachList').innerHTML = attachments
+    .map((f) => `<li title="${escapeHtml(f.name)}">📎 <span class="name">${escapeHtml(f.name)}</span>
+      <span class="muted">${fmtSize(f.size)}</span>
+      <button data-detach="${escapeHtml(f.id)}" aria-label="Retirer ${escapeHtml(f.name)}">✕</button></li>`)
+    .join('');
 }
-$('#cvInput').addEventListener('change', async (e) => {
-  const fd = new FormData();
-  [...e.target.files].forEach((f) => fd.append('files', f));
-  e.target.value = '';
+async function syncAttachments() {
+  // Retire les fichiers qui n'existent plus côté serveur.
   try {
+    const onServer = new Set((await api('/api/cv')).map((f) => f.id));
+    attachments = attachments.filter((f) => onServer.has(f.id));
+  } catch {}
+  renderAttachments();
+}
+$('#attachBtn').addEventListener('click', (e) => { e.preventDefault(); $('#attachInput').click(); });
+$('#attachInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (!files.length) return;
+  const fd = new FormData();
+  files.forEach((f) => fd.append('files', f));
+  try {
+    const before = new Set(attachments.map((f) => f.id));
     const list = await api('/api/cv', { method: 'POST', body: fd });
-    list.slice(-fd.getAll('files').length).forEach((f) => selectedCvs.add(f.id));
-    renderCvs(list);
-    toast('Fichier ajouté.', 'ok');
+    const added = list.slice(-files.length).filter((f) => !before.has(f.id));
+    attachments.push(...added);
+    renderAttachments();
+    toast(added.length > 1 ? `${added.length} fichiers joints.` : 'Fichier joint.', 'ok');
   } catch (err) { toast(err.message, 'error'); }
 });
-$('#cvList').addEventListener('change', (e) => {
-  const id = e.target.dataset.cv;
+$('#attachList').addEventListener('click', async (e) => {
+  const id = e.target.closest('[data-detach]')?.dataset.detach;
   if (!id) return;
-  e.target.checked ? selectedCvs.add(id) : selectedCvs.delete(id);
-  store.set('selectedCvs', [...selectedCvs]);
-});
-$('#cvList').addEventListener('click', async (e) => {
-  const id = e.target.dataset.cvdel;
-  if (id && confirm('Supprimer ce fichier ?')) renderCvs(await api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }));
+  attachments = attachments.filter((f) => f.id !== id);
+  renderAttachments();
+  api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }).catch(() => {});
 });
 
 // ---------- Éditeur ----------
@@ -239,8 +267,10 @@ const editor = $('#editor');
 const source = $('#htmlSource');
 let mode = 'visual';
 
-editor.innerHTML = store.get('html', DEFAULT_HTML);
-$('#subject').value = store.get('subject', DEFAULT_SUBJECT);
+// Champs d'en-tête du mail (vides par défaut).
+const HEADER_FIELDS = ['identitySelect', 'fromName', 'fromEmail', 'replyTo', 'cc', 'bcc', 'subject'];
+editor.innerHTML = store.get('html', '');
+HEADER_FIELDS.forEach((id) => { $('#' + id).value = store.get(id, ''); });
 
 const getHtml = () => (mode === 'html' ? source.value : editor.innerHTML);
 function setHtml(html) {
@@ -250,11 +280,130 @@ function setHtml(html) {
 }
 function saveDraft() {
   store.set('html', getHtml());
-  store.set('subject', $('#subject').value);
+  HEADER_FIELDS.forEach((id) => store.set(id, $('#' + id).value));
 }
 editor.addEventListener('input', saveDraft);
 source.addEventListener('input', saveDraft);
-$('#subject').addEventListener('input', saveDraft);
+HEADER_FIELDS.forEach((id) => $('#' + id).addEventListener('input', saveDraft));
+
+// ---------- Identités ----------
+let identities = [];
+const CUSTOM = '__custom';
+const identityLabel = (i) => (i.name ? `${i.name} <${i.email}>` : i.email);
+function renderIdentitySelect() {
+  const sel = $('#identitySelect');
+  const wanted = store.get('identitySelect', '');
+  sel.innerHTML =
+    '<option value="">Expéditeur par défaut (Réglages)</option>' +
+    identities.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(identityLabel(i))}</option>`).join('') +
+    `<option value="${CUSTOM}">Autre adresse…</option>`;
+  sel.value = [...sel.options].some((o) => o.value === wanted) ? wanted : '';
+  toggleCustomFrom();
+}
+function toggleCustomFrom() {
+  $$('.custom-from').forEach((el) => el.classList.toggle('hidden', $('#identitySelect').value !== CUSTOM));
+}
+$('#identitySelect').addEventListener('change', () => {
+  const i = identities.find((x) => x.id === $('#identitySelect').value);
+  // Comme Thunderbird : l'identité apporte ses Répondre à / Cc / Cci.
+  if (i) { $('#replyTo').value = i.replyTo || ''; $('#cc').value = i.cc || ''; $('#bcc').value = i.bcc || ''; }
+  toggleCustomFrom();
+  saveDraft();
+});
+function signatureHtml() {
+  const i = identities.find((x) => x.id === $('#identitySelect').value);
+  return i && i.signature ? `<div style="margin-top:20px">${i.signature}</div>` : '';
+}
+function currentSender() {
+  const v = $('#identitySelect').value;
+  const i = identities.find((x) => x.id === v);
+  if (i) return { name: i.name, email: i.email };
+  if (v === CUSTOM) return { name: $('#fromName').value.trim(), email: $('#fromEmail').value.trim() };
+  return { name: settingsCache.fromName || '', email: settingsCache.fromEmail || settingsCache.user || '' };
+}
+
+function renderIdentityList() {
+  $('#identityList').innerHTML = identities.length
+    ? identities.map((i) => `<li><span class="who"><strong>${escapeHtml(i.name || i.email)}</strong> <span class="muted">&lt;${escapeHtml(i.email)}&gt;</span><br>
+        <span class="muted small">${i.smtp ? 'Serveur : ' + escapeHtml(i.smtp.host) : 'Serveur principal'}${i.replyTo ? ' · Répondre à ' + escapeHtml(i.replyTo) : ''}</span></span>
+        <span class="actions"><button class="link" data-edit="${escapeHtml(i.id)}">Modifier</button>
+        <button class="link" data-test="${escapeHtml(i.id)}">Tester</button>
+        <button class="link danger" data-remove="${escapeHtml(i.id)}">Supprimer</button></span></li>`).join('')
+    : '<li class="muted">Aucune identité. Ajoutez-en une pour envoyer sous un autre nom ou une autre adresse.</li>';
+}
+async function loadIdentities(list) {
+  identities = list || (await api('/api/identities'));
+  renderIdentityList();
+  renderIdentitySelect();
+}
+const idForm = $('#identityForm');
+function openIdentityForm(i) {
+  idForm.reset();
+  idForm.elements.id.value = i ? i.id : '';
+  if (i) for (const k of ['name', 'email', 'replyTo', 'cc', 'bcc']) idForm.elements[k].value = i[k] || '';
+  $('#sigEditor').innerHTML = (i && i.signature) || '';
+  const custom = !!(i && i.smtp);
+  idForm.elements.smtpMode.value = custom ? 'custom' : 'default';
+  if (custom) {
+    idForm.elements.smtpHost.value = i.smtp.host;
+    idForm.elements.smtpPort.value = i.smtp.port;
+    idForm.elements.smtpSecure.checked = i.smtp.secure;
+    idForm.elements.smtpUser.value = i.smtp.user || '';
+    idForm.elements.smtpPass.value = i.smtp.pass || '';
+  }
+  $('#identitySmtp').classList.toggle('hidden', !custom);
+  idForm.classList.remove('hidden');
+  $('#addIdentity').classList.add('hidden');
+  idForm.elements.name.focus();
+}
+function closeIdentityForm() {
+  idForm.classList.add('hidden');
+  $('#addIdentity').classList.remove('hidden');
+}
+$('#addIdentity').addEventListener('click', () => openIdentityForm(null));
+$('#sigImage').addEventListener('click', () => $('#sigImageInput').click());
+$('#sigImageInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const { url } = await api('/api/images', { method: 'POST', body: fd });
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.style.cssText = 'max-width:180px;height:auto';
+    $('#sigEditor').appendChild(img);
+  } catch (err) { toast(err.message, 'error'); }
+});
+$('#cancelIdentity').addEventListener('click', closeIdentityForm);
+idForm.addEventListener('change', (e) => {
+  if (e.target.name === 'smtpMode') $('#identitySmtp').classList.toggle('hidden', idForm.elements.smtpMode.value !== 'custom');
+});
+idForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = idForm.elements;
+  const body = { id: f.id.value || undefined, name: f.name.value, email: f.email.value, replyTo: f.replyTo.value, cc: f.cc.value, bcc: f.bcc.value, signature: $('#sigEditor').innerHTML.trim() === '<br>' ? '' : $('#sigEditor').innerHTML.trim() };
+  if (f.smtpMode.value === 'custom') {
+    if (!f.smtpHost.value.trim()) return toast('Indiquez le serveur SMTP de cette identité.', 'error');
+    body.smtp = { host: f.smtpHost.value, port: f.smtpPort.value, secure: f.smtpSecure.checked, user: f.smtpUser.value, pass: f.smtpPass.value };
+  }
+  try {
+    await loadIdentities(await api('/api/identities', { method: 'POST', body }));
+    closeIdentityForm();
+    toast('Identité enregistrée.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
+});
+$('#identityList').addEventListener('click', async (e) => {
+  const { edit, test, remove } = e.target.dataset;
+  if (edit) openIdentityForm(identities.find((i) => i.id === edit));
+  if (test) {
+    try { toast((await api(`/api/identities/${test}/test`, { method: 'POST' })).message, 'ok'); }
+    catch (err) { toast('Échec : ' + err.message, 'error'); }
+  }
+  if (remove && (await askConfirm('Supprimer cette identité ?', 'Supprimer'))) loadIdentities(await api('/api/identities/' + remove, { method: 'DELETE' }));
+});
 
 function setMode(m) {
   if (mode === 'html' && m !== 'html') editor.innerHTML = source.value;
@@ -272,17 +421,17 @@ $$('.etab').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m
 // Indentation légère pour la vue HTML.
 const formatHtml = (html) => html.replace(/>\s*(<(p|h\d|ul|ol|li|div|table|tr|br)\b)/gi, '>\n$1').trim();
 
-$('#toolbar').addEventListener('click', (e) => {
+$('#toolbar').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-cmd]');
   if (!btn) return;
   e.preventDefault();
   const cmd = btn.dataset.cmd;
   let arg = null;
   if (cmd === 'createLink') {
-    arg = prompt('Adresse du lien (https://…, mailto:…) :');
+    arg = await askText('Adresse du lien (https://…, mailto:…) :', 'https://');
     if (!arg) return;
   }
-  editor.focus();
+  restoreSelection();
   document.execCommand(cmd, false, arg);
   saveDraft();
 });
@@ -345,9 +494,9 @@ async function uploadImage(file) {
 }
 $('#imgUploadBtn').addEventListener('click', (e) => { e.preventDefault(); $('#imgInput').click(); });
 $('#imgInput').addEventListener('change', (e) => { if (e.target.files[0]) uploadImage(e.target.files[0]); e.target.value = ''; });
-$('#imgUrlBtn').addEventListener('click', (e) => {
+$('#imgUrlBtn').addEventListener('click', async (e) => {
   e.preventDefault();
-  const url = prompt("URL de l'image (https://…) :");
+  const url = await askText("URL de l'image (https://…) :", 'https://');
   if (url) insertImage(url);
 });
 // Coller / glisser une image directement dans l'éditeur.
@@ -360,9 +509,9 @@ editor.addEventListener('drop', (e) => {
   if (img) { e.preventDefault(); uploadImage(img); }
 });
 // Double-clic sur une image : changer sa largeur.
-editor.addEventListener('dblclick', (e) => {
+editor.addEventListener('dblclick', async (e) => {
   if (e.target.tagName !== 'IMG') return;
-  const w = prompt('Largeur de l\'image en pixels (vide = taille d\'origine) :', e.target.style.width.replace('px', ''));
+  const w = await askText('Largeur de l\'image en pixels (vide = taille d\'origine) :', e.target.style.width.replace('px', ''));
   if (w === null) return;
   e.target.style.width = w ? `${parseInt(w, 10)}px` : '';
   saveDraft();
@@ -389,7 +538,9 @@ function renderPreviewRecipients() {
 function renderPreview() {
   const r = recipients[$('#previewRecipient').value] || { nom: 'Mme Dupont', entreprise: 'Exemple SA', poste: 'Développeur', email: 'rh@exemple.fr' };
   $('#previewSubject').textContent = fillVars($('#subject').value, r, false);
-  $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml(), r, true)}</body>`;
+  const from = currentSender();
+  $('#previewFrom').textContent = from.name ? `${from.name} <${from.email}>` : from.email || '(à configurer dans Réglages)';
+  $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml() + signatureHtml(), r, true)}</body>`;
 }
 $('#previewRecipient').addEventListener('change', renderPreview);
 
@@ -399,7 +550,7 @@ async function loadTemplates(list) {
   templates = list || (await api('/api/templates'));
   const sel = $('#templateSelect');
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— Modèles enregistrés —</option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
+  sel.innerHTML = '<option value=""></option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
   sel.value = templates.some((t) => t.name === cur) ? cur : '';
   $('#deleteTemplate').classList.toggle('hidden', !sel.value);
 }
@@ -407,22 +558,24 @@ $('#templateSelect').addEventListener('change', (e) => {
   const t = templates.find((x) => x.name === e.target.value);
   $('#deleteTemplate').classList.toggle('hidden', !t);
   if (!t) return;
-  $('#subject').value = t.subject;
+  HEADER_FIELDS.forEach((id) => { $('#' + id).value = t[id] || ''; });
+  if (!$('#identitySelect').value) $('#identitySelect').value = '';
+  toggleCustomFrom();
   setHtml(t.html);
   if (mode === 'html') source.value = formatHtml(t.html);
   toast(`Modèle « ${t.name} » chargé.`);
 });
 $('#saveTemplate').addEventListener('click', async () => {
-  const name = prompt('Nom du modèle :', $('#templateSelect').value || '');
+  const name = await askText('Nom du modèle :', $('#templateSelect').value || '');
   if (!name) return;
-  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, subject: $('#subject').value, html: getHtml() } }));
+  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, html: getHtml(), ...Object.fromEntries(HEADER_FIELDS.map((id) => [id, $('#' + id).value])) } }));
   $('#templateSelect').value = name;
   $('#deleteTemplate').classList.remove('hidden');
   toast('Modèle enregistré.', 'ok');
 });
 $('#deleteTemplate').addEventListener('click', async () => {
   const name = $('#templateSelect').value;
-  if (name && confirm(`Supprimer le modèle « ${name} » ?`)) {
+  if (name && (await askConfirm(`Supprimer le modèle « ${name} » ?`, 'Supprimer'))) {
     $('#templateSelect').value = '';
     loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' }));
   }
@@ -436,12 +589,20 @@ async function startSend(testTo) {
   const list = recipients.filter((r) => r._on).map(({ _on, ...r }) => r);
   if (!$('#subject').value.trim()) return toast("Renseignez l'objet du mail.", 'error');
   if (!testTo && !list.length) return toast('Aucun destinataire sélectionné.', 'error');
-  if (!selectedCvs.size && !confirm('Aucune pièce jointe sélectionnée. Envoyer quand même ?')) return;
-  if (!testTo && !confirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`)) return;
+  if (!attachments.length && !(await askConfirm("Aucune pièce jointe (CV). Envoyer quand même ?", 'Envoyer'))) return;
+  if (!testTo && !(await askConfirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`, 'Envoyer'))) return;
   try {
     const { jobId, total } = await api('/api/send', {
       method: 'POST',
-      body: { subject: $('#subject').value, html, recipients: list, cvIds: [...selectedCvs], testTo: testTo || undefined },
+      body: {
+        subject: $('#subject').value, html, recipients: list, cvIds: attachments.map((f) => f.id), testTo: testTo || undefined,
+        ...(identities.some((i) => i.id === $('#identitySelect').value)
+          ? { identityId: $('#identitySelect').value }
+          : $('#identitySelect').value === CUSTOM
+            ? { fromName: $('#fromName').value.trim(), fromEmail: $('#fromEmail').value.trim() }
+            : {}),
+        replyTo: $('#replyTo').value.trim(), cc: $('#cc').value.trim(), bcc: $('#bcc').value.trim(),
+      },
     });
     currentJob = jobId;
     $('#progress').classList.remove('hidden');
@@ -485,7 +646,7 @@ async function loadHistory() {
     : '<tr><td colspan="5" class="muted center">Aucun envoi pour le moment.</td></tr>';
 }
 $('#clearHistory').addEventListener('click', async () => {
-  if (confirm("Effacer tout l'historique ?")) { await api('/api/history', { method: 'DELETE' }); loadHistory(); }
+  if (await askConfirm("Effacer tout l'historique ?", 'Effacer')) { await api('/api/history', { method: 'DELETE' }); loadHistory(); }
 });
 $('#exportHistory').addEventListener('click', () => {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -503,15 +664,17 @@ const PRESETS = {
   yahoo: { host: 'smtp.mail.yahoo.com', port: 465, secure: true },
 };
 const form = $('#settingsForm');
+let settingsCache = {};
 async function loadSettings() {
   const s = await api('/api/settings');
+  settingsCache = s;
   for (const [k, v] of Object.entries(s)) {
     const el = form.elements[k];
     if (!el) continue;
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
   }
   $('#dryBadge').classList.toggle('hidden', !s.dryRun);
-  if (!$('#testTo').value) $('#testTo').value = store.get('testTo', s.fromEmail || s.user || '');
+  if (!$('#testTo').value) $('#testTo').value = store.get('testTo', '');
 }
 $$('[data-preset]').forEach((b) =>
   b.addEventListener('click', () => {
@@ -541,6 +704,7 @@ $('#testSmtp').addEventListener('click', async () => {
 
 // ---------- Démarrage ----------
 renderRecipients();
-renderCvs();
+syncAttachments();
+loadIdentities();
 loadTemplates();
 loadSettings();

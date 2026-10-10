@@ -23,6 +23,7 @@ for (const d of [DATA_DIR, IMG_DIR, CV_DIR, OUTBOX_DIR]) fs.mkdirSync(d, { recur
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const IDENTITIES_FILE = path.join(DATA_DIR, 'identities.json');
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -108,6 +109,64 @@ function createTransport(s) {
   });
 }
 
+// ---------- Identités (comme dans Thunderbird) ----------
+// Chaque identité a un nom affiché, une adresse, des Répondre à / Cc / Cci par défaut,
+// et soit le serveur principal, soit son propre serveur d'envoi.
+const readIdentities = () => readJson(IDENTITIES_FILE, []);
+const publicIdentity = (i) => ({ ...i, smtp: i.smtp ? { ...i.smtp, pass: i.smtp.pass ? '********' : '' } : null });
+
+app.get('/api/identities', (req, res) => res.json(readIdentities().map(publicIdentity)));
+
+app.post('/api/identities', (req, res) => {
+  const b = req.body || {};
+  const str = (v) => String(v || '').replace(/[\r\n]+/g, ' ').trim();
+  const list = readIdentities();
+  const existing = list.find((i) => i.id === b.id);
+  const identity = {
+    id: existing ? existing.id : crypto.randomBytes(6).toString('hex'),
+    name: str(b.name),
+    email: str(b.email),
+    replyTo: str(b.replyTo),
+    cc: str(b.cc),
+    bcc: str(b.bcc),
+    // Signature HTML ajoutée sous chaque mail (coordonnées, logo…).
+    signature: String(b.signature || '').slice(0, 200000),
+    smtp: null,
+  };
+  if (!EMAIL_RE.test(identity.email)) return res.status(400).json({ message: `Adresse invalide : « ${identity.email} ». Elle doit être de la forme nom@domaine.fr` });
+  if (b.smtp && b.smtp.host) {
+    const old = existing && existing.smtp ? existing.smtp : {};
+    identity.smtp = {
+      host: str(b.smtp.host),
+      port: Number(b.smtp.port) || 465,
+      secure: !!b.smtp.secure,
+      user: str(b.smtp.user),
+      pass: b.smtp.pass && b.smtp.pass !== '********' ? String(b.smtp.pass) : old.pass || '',
+    };
+  }
+  const next = existing ? list.map((i) => (i.id === identity.id ? identity : i)) : [...list, identity];
+  writeJson(IDENTITIES_FILE, next);
+  res.json(next.map(publicIdentity));
+});
+
+app.delete('/api/identities/:id', (req, res) => {
+  const next = readIdentities().filter((i) => i.id !== req.params.id);
+  writeJson(IDENTITIES_FILE, next);
+  res.json(next.map(publicIdentity));
+});
+
+app.post('/api/identities/:id/test', async (req, res) => {
+  const identity = readIdentities().find((i) => i.id === req.params.id);
+  if (!identity) return res.status(404).json({ message: 'Identité introuvable.' });
+  try {
+    if (DRY_RUN) return res.json({ ok: true, message: 'Mode simulation : aucune connexion SMTP réelle.' });
+    await createTransport(identity.smtp || getSettings()).verify();
+    res.json({ ok: true, message: 'Connexion réussie pour ' + identity.email + '.' });
+  } catch (e) {
+    res.status(400).json({ ok: false, message: e.message });
+  }
+});
+
 app.post('/api/settings/test', async (req, res) => {
   try {
     if (DRY_RUN) return res.json({ ok: true, message: 'Mode simulation : aucune connexion SMTP réelle.' });
@@ -164,10 +223,11 @@ app.delete('/api/cv/:id', (req, res) => {
 // ---------- Modèles de mail ----------
 app.get('/api/templates', (req, res) => res.json(readJson(TEMPLATES_FILE, [])));
 app.post('/api/templates', (req, res) => {
-  const { name, subject, html } = req.body || {};
+  const { name, html } = req.body || {};
   if (!name) return res.status(400).json({ message: 'Nom du modèle requis.' });
   const list = readJson(TEMPLATES_FILE, []).filter((t) => t.name !== name);
-  list.push({ name, subject: subject || '', html: html || '', updatedAt: new Date().toISOString() });
+  const fields = Object.fromEntries(['subject', 'identitySelect', 'fromName', 'fromEmail', 'replyTo', 'cc', 'bcc'].map((k) => [k, String(req.body[k] || '')]));
+  list.push({ name, ...fields, html: html || '', updatedAt: new Date().toISOString() });
   writeJson(TEMPLATES_FILE, list);
   res.json(list);
 });
@@ -224,6 +284,7 @@ function inlineImages(html) {
 function htmlToText(html) {
   return html
     .replace(/<(br|\/p|\/div|\/h\d|\/li)\s*\/?>/gi, '\n')
+    .replace(/<div\b[^>]*>/gi, '\n')
     .replace(/<li[^>]*>/gi, '• ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -232,8 +293,9 @@ function htmlToText(html) {
     .trim();
 }
 
-function buildMessage(s, { subject, html, vars, to, cvIds }) {
-  const filled = fillVars(html, vars, true);
+function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature }) {
+  const body = signature ? `${html}<div style="margin-top:20px">${signature}</div>` : html;
+  const filled = fillVars(body, vars, true);
   const wrapped = `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">${filled}</body></html>`;
   const { html: finalHtml, attachments } = inlineImages(wrapped);
   for (const id of cvIds || []) {
@@ -244,6 +306,8 @@ function buildMessage(s, { subject, html, vars, to, cvIds }) {
   return {
     from, to,
     replyTo: s.replyTo || undefined,
+    cc: cc && cc.length ? cc : undefined,
+    bcc: bcc && bcc.length ? bcc : undefined,
     subject: fillVars(subject, vars, false),
     html: finalHtml,
     text: htmlToText(filled),
@@ -256,9 +320,31 @@ const jobs = new Map();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 app.post('/api/send', (req, res) => {
-  const s = getSettings();
+  const settings = getSettings();
   const { subject, html, recipients, cvIds, testTo } = req.body || {};
   if (!subject || !html) return res.status(400).json({ message: 'Objet et contenu requis.' });
+
+  // En-têtes propres à ce mail ; vides = valeurs des Réglages.
+  const clean = (v) => String(v || '').replace(/[\r\n]+/g, ' ').trim();
+  const splitList = (v) => clean(v).split(/[,;]/).map((x) => x.trim()).filter(Boolean);
+  const identity = req.body.identityId ? readIdentities().find((i) => i.id === req.body.identityId) : null;
+  if (req.body.identityId && !identity) return res.status(400).json({ message: 'Identité introuvable. Rechargez la page.' });
+  const fromName = identity ? identity.name : clean(req.body.fromName);
+  const fromEmail = identity ? identity.email : clean(req.body.fromEmail);
+  const replyTo = clean(req.body.replyTo);
+  const cc = testTo ? [] : splitList(req.body.cc);
+  const bcc = testTo ? [] : splitList(req.body.bcc);
+  for (const [label, value] of [['De', fromEmail], ['Répondre à', replyTo], ...cc.map((v) => ['Cc', v]), ...bcc.map((v) => ['Cci', v])]) {
+    if (value && !EMAIL_RE.test(value)) return res.status(400).json({ message: `Adresse « ${label} » invalide : ${value}` });
+  }
+  const s = {
+    ...settings,
+    // Serveur propre à l'identité, sinon le serveur principal.
+    ...(identity && identity.smtp ? identity.smtp : {}),
+    fromName: fromName || settings.fromName,
+    fromEmail: fromEmail || settings.fromEmail,
+    replyTo: replyTo || settings.replyTo,
+  };
   if (!DRY_RUN && (!s.host || !(s.fromEmail || s.user)))
     return res.status(400).json({ message: 'Configurez d\'abord le SMTP dans « Réglages ».' });
 
@@ -290,7 +376,7 @@ app.post('/api/send', (req, res) => {
       if (job.cancelled) break;
       const entry = { email: r.email, entreprise: r.entreprise || r.company || '', at: new Date().toISOString() };
       try {
-        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds }));
+        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc, signature: identity ? identity.signature : '' }));
         if (DRY_RUN) {
           // Simulation : le mail est enregistré en .eml (ouvrable dans Thunderbird/Outlook) au lieu d'être envoyé.
           const file = path.join(OUTBOX_DIR, `${Date.now()}_${r.email.replace(/[^\w.@-]/g, '_')}.eml`);
