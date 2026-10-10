@@ -24,6 +24,33 @@ function toast(msg, type = '') {
 const escapeHtml = (v) =>
   String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Boîte de dialogue intégrée à la page (remplace confirm/prompt du navigateur).
+function ask(message, { input = false, value = '', ok = 'OK' } = {}) {
+  return new Promise((resolve) => {
+    const box = $('#dialog');
+    $('#dialogMsg').textContent = message;
+    const field = $('#dialogInput');
+    field.classList.toggle('hidden', !input);
+    field.value = value;
+    $('#dialogOk').textContent = ok;
+    box.classList.remove('hidden');
+    (input ? field : $('#dialogOk')).focus();
+    const close = (result) => {
+      box.classList.add('hidden');
+      $('#dialogOk').onclick = $('#dialogCancel').onclick = field.onkeydown = null;
+      resolve(result);
+    };
+    $('#dialogOk').onclick = () => close(input ? field.value : true);
+    $('#dialogCancel').onclick = () => close(input ? null : false);
+    field.onkeydown = (e) => {
+      if (e.key === 'Enter') close(field.value);
+      if (e.key === 'Escape') close(null);
+    };
+  });
+}
+const askConfirm = (message, ok) => ask(message, { ok });
+const askText = (message, value = '') => ask(message, { input: true, value });
+
 const EMAIL_RE = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/;
 
 // ---------- Navigation ----------
@@ -195,8 +222,8 @@ $('#selectAll').addEventListener('click', () => {
   recipients.forEach((r) => (r._on = !all));
   saveRecipients();
 });
-$('#clearRecipients').addEventListener('click', () => {
-  if (recipients.length && confirm('Vider toute la liste des destinataires ?')) { recipients = []; saveRecipients(); }
+$('#clearRecipients').addEventListener('click', async () => {
+  if (recipients.length && (await askConfirm('Vider toute la liste des destinataires ?', 'Vider'))) { recipients = []; saveRecipients(); }
 });
 
 // ---------- Pièces jointes ----------
@@ -231,7 +258,7 @@ $('#cvList').addEventListener('change', (e) => {
 });
 $('#cvList').addEventListener('click', async (e) => {
   const id = e.target.dataset.cvdel;
-  if (id && confirm('Supprimer ce fichier ?')) renderCvs(await api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }));
+  if (id && (await askConfirm('Supprimer ce fichier ?', 'Supprimer'))) renderCvs(await api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }));
 });
 
 // ---------- Éditeur ----------
@@ -272,17 +299,17 @@ $$('.etab').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.m
 // Indentation légère pour la vue HTML.
 const formatHtml = (html) => html.replace(/>\s*(<(p|h\d|ul|ol|li|div|table|tr|br)\b)/gi, '>\n$1').trim();
 
-$('#toolbar').addEventListener('click', (e) => {
+$('#toolbar').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-cmd]');
   if (!btn) return;
   e.preventDefault();
   const cmd = btn.dataset.cmd;
   let arg = null;
   if (cmd === 'createLink') {
-    arg = prompt('Adresse du lien (https://…, mailto:…) :');
+    arg = await askText('Adresse du lien (https://…, mailto:…) :', 'https://');
     if (!arg) return;
   }
-  editor.focus();
+  restoreSelection();
   document.execCommand(cmd, false, arg);
   saveDraft();
 });
@@ -345,9 +372,9 @@ async function uploadImage(file) {
 }
 $('#imgUploadBtn').addEventListener('click', (e) => { e.preventDefault(); $('#imgInput').click(); });
 $('#imgInput').addEventListener('change', (e) => { if (e.target.files[0]) uploadImage(e.target.files[0]); e.target.value = ''; });
-$('#imgUrlBtn').addEventListener('click', (e) => {
+$('#imgUrlBtn').addEventListener('click', async (e) => {
   e.preventDefault();
-  const url = prompt("URL de l'image (https://…) :");
+  const url = await askText("URL de l'image (https://…) :", 'https://');
   if (url) insertImage(url);
 });
 // Coller / glisser une image directement dans l'éditeur.
@@ -360,9 +387,9 @@ editor.addEventListener('drop', (e) => {
   if (img) { e.preventDefault(); uploadImage(img); }
 });
 // Double-clic sur une image : changer sa largeur.
-editor.addEventListener('dblclick', (e) => {
+editor.addEventListener('dblclick', async (e) => {
   if (e.target.tagName !== 'IMG') return;
-  const w = prompt('Largeur de l\'image en pixels (vide = taille d\'origine) :', e.target.style.width.replace('px', ''));
+  const w = await askText('Largeur de l\'image en pixels (vide = taille d\'origine) :', e.target.style.width.replace('px', ''));
   if (w === null) return;
   e.target.style.width = w ? `${parseInt(w, 10)}px` : '';
   saveDraft();
@@ -413,7 +440,7 @@ $('#templateSelect').addEventListener('change', (e) => {
   toast(`Modèle « ${t.name} » chargé.`);
 });
 $('#saveTemplate').addEventListener('click', async () => {
-  const name = prompt('Nom du modèle :', $('#templateSelect').value || '');
+  const name = await askText('Nom du modèle :', $('#templateSelect').value || '');
   if (!name) return;
   await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, subject: $('#subject').value, html: getHtml() } }));
   $('#templateSelect').value = name;
@@ -422,7 +449,7 @@ $('#saveTemplate').addEventListener('click', async () => {
 });
 $('#deleteTemplate').addEventListener('click', async () => {
   const name = $('#templateSelect').value;
-  if (name && confirm(`Supprimer le modèle « ${name} » ?`)) {
+  if (name && (await askConfirm(`Supprimer le modèle « ${name} » ?`, 'Supprimer'))) {
     $('#templateSelect').value = '';
     loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' }));
   }
@@ -436,8 +463,8 @@ async function startSend(testTo) {
   const list = recipients.filter((r) => r._on).map(({ _on, ...r }) => r);
   if (!$('#subject').value.trim()) return toast("Renseignez l'objet du mail.", 'error');
   if (!testTo && !list.length) return toast('Aucun destinataire sélectionné.', 'error');
-  if (!selectedCvs.size && !confirm('Aucune pièce jointe sélectionnée. Envoyer quand même ?')) return;
-  if (!testTo && !confirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`)) return;
+  if (!selectedCvs.size && !(await askConfirm('Aucune pièce jointe sélectionnée. Envoyer quand même ?', 'Envoyer'))) return;
+  if (!testTo && !(await askConfirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`, 'Envoyer'))) return;
   try {
     const { jobId, total } = await api('/api/send', {
       method: 'POST',
@@ -485,7 +512,7 @@ async function loadHistory() {
     : '<tr><td colspan="5" class="muted center">Aucun envoi pour le moment.</td></tr>';
 }
 $('#clearHistory').addEventListener('click', async () => {
-  if (confirm("Effacer tout l'historique ?")) { await api('/api/history', { method: 'DELETE' }); loadHistory(); }
+  if (await askConfirm("Effacer tout l'historique ?", 'Effacer')) { await api('/api/history', { method: 'DELETE' }); loadHistory(); }
 });
 $('#exportHistory').addEventListener('click', () => {
   const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
