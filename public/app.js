@@ -267,7 +267,7 @@ const source = $('#htmlSource');
 let mode = 'visual';
 
 // Champs d'en-tête du mail (vides par défaut).
-const HEADER_FIELDS = ['fromName', 'fromEmail', 'replyTo', 'cc', 'bcc', 'subject'];
+const HEADER_FIELDS = ['identitySelect', 'fromName', 'fromEmail', 'replyTo', 'cc', 'bcc', 'subject'];
 editor.innerHTML = store.get('html', '');
 HEADER_FIELDS.forEach((id) => { $('#' + id).value = store.get(id, ''); });
 
@@ -284,6 +284,104 @@ function saveDraft() {
 editor.addEventListener('input', saveDraft);
 source.addEventListener('input', saveDraft);
 HEADER_FIELDS.forEach((id) => $('#' + id).addEventListener('input', saveDraft));
+
+// ---------- Identités ----------
+let identities = [];
+const CUSTOM = '__custom';
+const identityLabel = (i) => (i.name ? `${i.name} <${i.email}>` : i.email);
+function renderIdentitySelect() {
+  const sel = $('#identitySelect');
+  const wanted = store.get('identitySelect', '');
+  sel.innerHTML =
+    '<option value="">Expéditeur par défaut (Réglages)</option>' +
+    identities.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(identityLabel(i))}</option>`).join('') +
+    `<option value="${CUSTOM}">Autre adresse…</option>`;
+  sel.value = [...sel.options].some((o) => o.value === wanted) ? wanted : '';
+  toggleCustomFrom();
+}
+function toggleCustomFrom() {
+  $$('.custom-from').forEach((el) => el.classList.toggle('hidden', $('#identitySelect').value !== CUSTOM));
+}
+$('#identitySelect').addEventListener('change', () => {
+  const i = identities.find((x) => x.id === $('#identitySelect').value);
+  // Comme Thunderbird : l'identité apporte ses Répondre à / Cc / Cci.
+  if (i) { $('#replyTo').value = i.replyTo || ''; $('#cc').value = i.cc || ''; $('#bcc').value = i.bcc || ''; }
+  toggleCustomFrom();
+  saveDraft();
+});
+function currentSender() {
+  const v = $('#identitySelect').value;
+  const i = identities.find((x) => x.id === v);
+  if (i) return { name: i.name, email: i.email };
+  if (v === CUSTOM) return { name: $('#fromName').value.trim(), email: $('#fromEmail').value.trim() };
+  return { name: settingsCache.fromName || '', email: settingsCache.fromEmail || settingsCache.user || '' };
+}
+
+function renderIdentityList() {
+  $('#identityList').innerHTML = identities.length
+    ? identities.map((i) => `<li><span class="who"><strong>${escapeHtml(i.name || i.email)}</strong> <span class="muted">&lt;${escapeHtml(i.email)}&gt;</span><br>
+        <span class="muted small">${i.smtp ? 'Serveur : ' + escapeHtml(i.smtp.host) : 'Serveur principal'}${i.replyTo ? ' · Répondre à ' + escapeHtml(i.replyTo) : ''}</span></span>
+        <span class="actions"><button class="link" data-edit="${escapeHtml(i.id)}">Modifier</button>
+        <button class="link" data-test="${escapeHtml(i.id)}">Tester</button>
+        <button class="link danger" data-remove="${escapeHtml(i.id)}">Supprimer</button></span></li>`).join('')
+    : '<li class="muted">Aucune identité. Ajoutez-en une pour envoyer sous un autre nom ou une autre adresse.</li>';
+}
+async function loadIdentities(list) {
+  identities = list || (await api('/api/identities'));
+  renderIdentityList();
+  renderIdentitySelect();
+}
+const idForm = $('#identityForm');
+function openIdentityForm(i) {
+  idForm.reset();
+  idForm.elements.id.value = i ? i.id : '';
+  if (i) for (const k of ['name', 'email', 'replyTo', 'cc', 'bcc']) idForm.elements[k].value = i[k] || '';
+  const custom = !!(i && i.smtp);
+  idForm.elements.smtpMode.value = custom ? 'custom' : 'default';
+  if (custom) {
+    idForm.elements.smtpHost.value = i.smtp.host;
+    idForm.elements.smtpPort.value = i.smtp.port;
+    idForm.elements.smtpSecure.checked = i.smtp.secure;
+    idForm.elements.smtpUser.value = i.smtp.user || '';
+    idForm.elements.smtpPass.value = i.smtp.pass || '';
+  }
+  $('#identitySmtp').classList.toggle('hidden', !custom);
+  idForm.classList.remove('hidden');
+  $('#addIdentity').classList.add('hidden');
+  idForm.elements.name.focus();
+}
+function closeIdentityForm() {
+  idForm.classList.add('hidden');
+  $('#addIdentity').classList.remove('hidden');
+}
+$('#addIdentity').addEventListener('click', () => openIdentityForm(null));
+$('#cancelIdentity').addEventListener('click', closeIdentityForm);
+idForm.addEventListener('change', (e) => {
+  if (e.target.name === 'smtpMode') $('#identitySmtp').classList.toggle('hidden', idForm.elements.smtpMode.value !== 'custom');
+});
+idForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = idForm.elements;
+  const body = { id: f.id.value || undefined, name: f.name.value, email: f.email.value, replyTo: f.replyTo.value, cc: f.cc.value, bcc: f.bcc.value };
+  if (f.smtpMode.value === 'custom') {
+    if (!f.smtpHost.value.trim()) return toast('Indiquez le serveur SMTP de cette identité.', 'error');
+    body.smtp = { host: f.smtpHost.value, port: f.smtpPort.value, secure: f.smtpSecure.checked, user: f.smtpUser.value, pass: f.smtpPass.value };
+  }
+  try {
+    await loadIdentities(await api('/api/identities', { method: 'POST', body }));
+    closeIdentityForm();
+    toast('Identité enregistrée.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
+});
+$('#identityList').addEventListener('click', async (e) => {
+  const { edit, test, remove } = e.target.dataset;
+  if (edit) openIdentityForm(identities.find((i) => i.id === edit));
+  if (test) {
+    try { toast((await api(`/api/identities/${test}/test`, { method: 'POST' })).message, 'ok'); }
+    catch (err) { toast('Échec : ' + err.message, 'error'); }
+  }
+  if (remove && (await askConfirm('Supprimer cette identité ?', 'Supprimer'))) loadIdentities(await api('/api/identities/' + remove, { method: 'DELETE' }));
+});
 
 function setMode(m) {
   if (mode === 'html' && m !== 'html') editor.innerHTML = source.value;
@@ -418,9 +516,8 @@ function renderPreviewRecipients() {
 function renderPreview() {
   const r = recipients[$('#previewRecipient').value] || { nom: 'Mme Dupont', entreprise: 'Exemple SA', poste: 'Développeur', email: 'rh@exemple.fr' };
   $('#previewSubject').textContent = fillVars($('#subject').value, r, false);
-  const fromName = $('#fromName').value.trim() || settingsCache.fromName || '';
-  const fromEmail = $('#fromEmail').value.trim() || settingsCache.fromEmail || settingsCache.user || '';
-  $('#previewFrom').textContent = fromName ? `${fromName} <${fromEmail}>` : fromEmail || '(adresse des Réglages)';
+  const from = currentSender();
+  $('#previewFrom').textContent = from.name ? `${from.name} <${from.email}>` : from.email || '(à configurer dans Réglages)';
   $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml(), r, true)}</body>`;
 }
 $('#previewRecipient').addEventListener('change', renderPreview);
@@ -440,6 +537,8 @@ $('#templateSelect').addEventListener('change', (e) => {
   $('#deleteTemplate').classList.toggle('hidden', !t);
   if (!t) return;
   HEADER_FIELDS.forEach((id) => { $('#' + id).value = t[id] || ''; });
+  if (!$('#identitySelect').value) $('#identitySelect').value = '';
+  toggleCustomFrom();
   setHtml(t.html);
   if (mode === 'html') source.value = formatHtml(t.html);
   toast(`Modèle « ${t.name} » chargé.`);
@@ -475,7 +574,11 @@ async function startSend(testTo) {
       method: 'POST',
       body: {
         subject: $('#subject').value, html, recipients: list, cvIds: attachments.map((f) => f.id), testTo: testTo || undefined,
-        fromName: $('#fromName').value.trim(), fromEmail: $('#fromEmail').value.trim(),
+        ...(identities.some((i) => i.id === $('#identitySelect').value)
+          ? { identityId: $('#identitySelect').value }
+          : $('#identitySelect').value === CUSTOM
+            ? { fromName: $('#fromName').value.trim(), fromEmail: $('#fromEmail').value.trim() }
+            : {}),
         replyTo: $('#replyTo').value.trim(), cc: $('#cc').value.trim(), bcc: $('#bcc').value.trim(),
       },
     });
@@ -580,5 +683,6 @@ $('#testSmtp').addEventListener('click', async () => {
 // ---------- Démarrage ----------
 renderRecipients();
 syncAttachments();
+loadIdentities();
 loadTemplates();
 loadSettings();
