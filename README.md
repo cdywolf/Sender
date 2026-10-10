@@ -60,6 +60,9 @@ Chaque identité a :
 - un **nom affiché** (ex. `AKAZA Fashion`) et une **adresse** (ex. `contact@akaza-fashion.fr`) ;
 - des **Répondre à**, **Cc** et **Cci** par défaut, repris automatiquement quand on la choisit ;
 - un **serveur d'envoi** : le serveur principal, ou un serveur SMTP propre à cette identité.
+- une **signature** (coordonnées, site, téléphone, logo) ajoutée automatiquement sous chaque mail.
+
+Ce que voit le destinataire : le **nom affiché** (libre), l'**adresse** d'envoi, puis la **signature** en bas du mail.
 
 En écrivant le mail, le champ **De** propose vos identités, l'expéditeur par défaut, ou « Autre adresse… » pour une adresse ponctuelle.
 

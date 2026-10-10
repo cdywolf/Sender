@@ -129,6 +129,8 @@ app.post('/api/identities', (req, res) => {
     replyTo: str(b.replyTo),
     cc: str(b.cc),
     bcc: str(b.bcc),
+    // Signature HTML ajoutée sous chaque mail (coordonnées, logo…).
+    signature: String(b.signature || '').slice(0, 200000),
     smtp: null,
   };
   if (!EMAIL_RE.test(identity.email)) return res.status(400).json({ message: `Adresse invalide : « ${identity.email} ». Elle doit être de la forme nom@domaine.fr` });
@@ -282,6 +284,7 @@ function inlineImages(html) {
 function htmlToText(html) {
   return html
     .replace(/<(br|\/p|\/div|\/h\d|\/li)\s*\/?>/gi, '\n')
+    .replace(/<div\b[^>]*>/gi, '\n')
     .replace(/<li[^>]*>/gi, '• ')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -290,8 +293,9 @@ function htmlToText(html) {
     .trim();
 }
 
-function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc }) {
-  const filled = fillVars(html, vars, true);
+function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature }) {
+  const body = signature ? `${html}<div style="margin-top:20px">${signature}</div>` : html;
+  const filled = fillVars(body, vars, true);
   const wrapped = `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">${filled}</body></html>`;
   const { html: finalHtml, attachments } = inlineImages(wrapped);
   for (const id of cvIds || []) {
@@ -372,7 +376,7 @@ app.post('/api/send', (req, res) => {
       if (job.cancelled) break;
       const entry = { email: r.email, entreprise: r.entreprise || r.company || '', at: new Date().toISOString() };
       try {
-        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc }));
+        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc, signature: identity ? identity.signature : '' }));
         if (DRY_RUN) {
           // Simulation : le mail est enregistré en .eml (ouvrable dans Thunderbird/Outlook) au lieu d'être envoyé.
           const file = path.join(OUTBOX_DIR, `${Date.now()}_${r.email.replace(/[^\w.@-]/g, '_')}.eml`);

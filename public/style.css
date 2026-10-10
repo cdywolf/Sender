@@ -123,6 +123,9 @@ td.ok { color: var(--ok); } td.error { color: var(--error); }
 .attach-list li span.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attach-list button { background: none; border: 0; color: var(--muted); cursor: pointer; font: inherit; padding: 0 4px; }
 .attach-list button:hover { color: var(--error); }
+.field-block { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-weight: 500; }
+.sig-editor { min-height: 110px; max-height: 300px; }
 .stack { display: flex; flex-direction: column; gap: 20px; }
 .fieldset { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; margin: 0; }
 .fieldset legend { font-weight: 600; padding: 0 4px; }

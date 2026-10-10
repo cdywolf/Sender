@@ -310,6 +310,10 @@ $('#identitySelect').addEventListener('change', () => {
   toggleCustomFrom();
   saveDraft();
 });
+function signatureHtml() {
+  const i = identities.find((x) => x.id === $('#identitySelect').value);
+  return i && i.signature ? `<div style="margin-top:20px">${i.signature}</div>` : '';
+}
 function currentSender() {
   const v = $('#identitySelect').value;
   const i = identities.find((x) => x.id === v);
@@ -337,6 +341,7 @@ function openIdentityForm(i) {
   idForm.reset();
   idForm.elements.id.value = i ? i.id : '';
   if (i) for (const k of ['name', 'email', 'replyTo', 'cc', 'bcc']) idForm.elements[k].value = i[k] || '';
+  $('#sigEditor').innerHTML = (i && i.signature) || '';
   const custom = !!(i && i.smtp);
   idForm.elements.smtpMode.value = custom ? 'custom' : 'default';
   if (custom) {
@@ -356,6 +361,22 @@ function closeIdentityForm() {
   $('#addIdentity').classList.remove('hidden');
 }
 $('#addIdentity').addEventListener('click', () => openIdentityForm(null));
+$('#sigImage').addEventListener('click', () => $('#sigImageInput').click());
+$('#sigImageInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const { url } = await api('/api/images', { method: 'POST', body: fd });
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '';
+    img.style.cssText = 'max-width:180px;height:auto';
+    $('#sigEditor').appendChild(img);
+  } catch (err) { toast(err.message, 'error'); }
+});
 $('#cancelIdentity').addEventListener('click', closeIdentityForm);
 idForm.addEventListener('change', (e) => {
   if (e.target.name === 'smtpMode') $('#identitySmtp').classList.toggle('hidden', idForm.elements.smtpMode.value !== 'custom');
@@ -363,7 +384,7 @@ idForm.addEventListener('change', (e) => {
 idForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = idForm.elements;
-  const body = { id: f.id.value || undefined, name: f.name.value, email: f.email.value, replyTo: f.replyTo.value, cc: f.cc.value, bcc: f.bcc.value };
+  const body = { id: f.id.value || undefined, name: f.name.value, email: f.email.value, replyTo: f.replyTo.value, cc: f.cc.value, bcc: f.bcc.value, signature: $('#sigEditor').innerHTML.trim() === '<br>' ? '' : $('#sigEditor').innerHTML.trim() };
   if (f.smtpMode.value === 'custom') {
     if (!f.smtpHost.value.trim()) return toast('Indiquez le serveur SMTP de cette identité.', 'error');
     body.smtp = { host: f.smtpHost.value, port: f.smtpPort.value, secure: f.smtpSecure.checked, user: f.smtpUser.value, pass: f.smtpPass.value };
@@ -519,7 +540,7 @@ function renderPreview() {
   $('#previewSubject').textContent = fillVars($('#subject').value, r, false);
   const from = currentSender();
   $('#previewFrom').textContent = from.name ? `${from.name} <${from.email}>` : from.email || '(à configurer dans Réglages)';
-  $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml(), r, true)}</body>`;
+  $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml() + signatureHtml(), r, true)}</body>`;
 }
 $('#previewRecipient').addEventListener('change', renderPreview);
 

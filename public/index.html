@@ -177,6 +177,15 @@
           <label>Cc <input name="cc"></label>
           <label>Cci <input name="bcc"></label>
         </div>
+        <div class="field-block">
+          <span class="field-label">Signature (ajoutée sous chaque mail)</span>
+          <div id="sigEditor" class="editor sig-editor" contenteditable="true" aria-label="Signature"></div>
+          <div class="row wrap small">
+            <button class="btn ghost" type="button" id="sigImage">🖼️ Ajouter un logo ou une image</button>
+            <span class="muted">Coordonnées, site, téléphone, logo… Vous pouvez aussi coller une signature copiée ailleurs.</span>
+          </div>
+          <input type="file" id="sigImageInput" accept="image/*" hidden>
+        </div>
         <fieldset class="fieldset">
           <legend>Serveur d'envoi (SMTP sortant)</legend>
           <label class="check"><input type="radio" name="smtpMode" value="default" checked> Serveur principal (ci-dessous)</label>
