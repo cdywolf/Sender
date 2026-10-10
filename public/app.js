@@ -155,14 +155,15 @@ $('#manualForm').addEventListener('submit', (e) => {
   const email = $('#mEmail').value.trim().toLowerCase();
   if (!EMAIL_RE.test(email)) return toast('Adresse e-mail invalide.', 'error');
   if (recipients.some((r) => r.email === email)) return toast('Cette adresse est déjà dans la liste.', 'error');
-  recipients.push({ email, nom: $('#mNom').value.trim(), entreprise: $('#mEntreprise').value.trim(), poste: $('#mPoste').value.trim(), _on: true });
+  recipients.push({ email, _on: true });
   e.target.reset();
   $('#mEmail').focus();
   saveRecipients();
 });
 
 const columns = () => {
-  const cols = new Set(['email', 'nom', 'entreprise', 'poste']);
+  // Les autres colonnes (nom, entreprise…) n'apparaissent que si un CSV les apporte.
+  const cols = new Set(['email']);
   recipients.forEach((r) => Object.keys(r).forEach((k) => k !== '_on' && cols.add(k)));
   return [...cols];
 };
