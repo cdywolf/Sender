@@ -1,0 +1,546 @@
+// CV Sender : interface (vanilla JS, aucune dépendance).
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+const api = async (url, opts = {}) => {
+  const res = await fetch(url, {
+    ...opts,
+    headers: opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : undefined,
+    body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `Erreur ${res.status}`);
+  return data;
+};
+
+function toast(msg, type = '') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = `toast ${type}`;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.add('hidden'), 4000);
+}
+
+const escapeHtml = (v) =>
+  String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const EMAIL_RE = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/;
+
+// ---------- Navigation ----------
+$$('.tab').forEach((b) =>
+  b.addEventListener('click', () => {
+    $$('.tab').forEach((x) => x.classList.toggle('active', x === b));
+    $$('.view').forEach((v) => v.classList.toggle('hidden', v.id !== 'view-' + b.dataset.view));
+    if (b.dataset.view === 'history') loadHistory();
+  })
+);
+
+// ---------- État persistant (brouillon) ----------
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('cvs.' + k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('cvs.' + k, JSON.stringify(v)); } catch {} },
+};
+
+let recipients = store.get('recipients', []);
+let selectedCvs = new Set(store.get('selectedCvs', []));
+
+const DEFAULT_SUBJECT = 'Candidature – {{poste}} chez {{entreprise}}';
+const DEFAULT_HTML = `<p>Bonjour {{nom}},</p>
+<p>Je me permets de vous adresser ma candidature pour un poste de <b>{{poste}}</b> au sein de <b>{{entreprise}}</b>.</p>
+<p>Vous trouverez mon CV en pièce jointe. Je serais ravi(e) d'échanger avec vous sur la manière dont je pourrais contribuer à vos projets.</p>
+<p>Je vous remercie par avance pour votre attention et reste disponible pour un entretien.</p>
+<p>Bien cordialement,<br>Votre Prénom Nom<br>06 00 00 00 00</p>`;
+
+// ---------- CSV ----------
+function parseCsv(text) {
+  text = text.replace(/^﻿/, '');
+  const firstLine = text.split(/\r?\n/)[0] || '';
+  const delim = [';', ',', '\t'].sort((a, b) => firstLine.split(b).length - firstLine.split(a).length)[0];
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === delim) { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((v) => v.trim()));
+}
+
+const ALIASES = {
+  email: ['email', 'e-mail', 'mail', 'courriel', 'adresse', 'adresse email', 'adresse e-mail', 'adresse mail'],
+  nom: ['nom', 'name', 'contact', 'nom complet', 'recruteur'],
+  prenom: ['prenom', 'prénom', 'first name', 'firstname'],
+  entreprise: ['entreprise', 'société', 'societe', 'company', 'organisation', 'employeur'],
+  poste: ['poste', 'job', 'intitulé', 'intitule', 'offre', 'position'],
+};
+function normalizeHeader(h) {
+  const k = h.trim().toLowerCase();
+  for (const [canon, list] of Object.entries(ALIASES)) if (list.includes(k)) return canon;
+  return k.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '_').replace(/^_|_$/g, '') || 'col';
+}
+
+function importCsv(text) {
+  const rows = parseCsv(text);
+  if (!rows.length) return toast('Fichier vide.', 'error');
+  let headers = rows[0].map(normalizeHeader);
+  let body = rows.slice(1);
+  if (!headers.includes('email')) {
+    // Pas d'en-tête reconnu : on cherche la colonne qui contient des e-mails.
+    const idx = rows[0].findIndex((v) => EMAIL_RE.test(v.trim()));
+    if (idx === -1) return toast('Aucune colonne « email » trouvée dans le CSV.', 'error');
+    headers = rows[0].map((_, i) => (i === idx ? 'email' : 'col' + (i + 1)));
+    body = rows;
+  }
+  let added = 0, invalid = 0, dup = 0;
+  const existing = new Set(recipients.map((r) => r.email));
+  for (const r of body) {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = (r[i] || '').trim(); });
+    obj.email = obj.email.toLowerCase();
+    if (!EMAIL_RE.test(obj.email)) { invalid++; continue; }
+    if (existing.has(obj.email)) { dup++; continue; }
+    existing.add(obj.email);
+    recipients.push({ ...obj, _on: true });
+    added++;
+  }
+  saveRecipients();
+  toast(`${added} destinataire(s) importé(s)` + (dup ? `, ${dup} doublon(s) ignoré(s)` : '') + (invalid ? `, ${invalid} adresse(s) invalide(s)` : '') + '.', 'ok');
+}
+
+$('#csvInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  if (f) importCsv(await f.text());
+  e.target.value = '';
+});
+const drop = $('#csvDrop');
+['dragover', 'dragenter'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, () => drop.classList.remove('over')));
+drop.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) importCsv(await f.text());
+});
+
+$('#manualForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const email = $('#mEmail').value.trim().toLowerCase();
+  if (!EMAIL_RE.test(email)) return toast('Adresse e-mail invalide.', 'error');
+  if (recipients.some((r) => r.email === email)) return toast('Cette adresse est déjà dans la liste.', 'error');
+  recipients.push({ email, nom: $('#mNom').value.trim(), entreprise: $('#mEntreprise').value.trim(), poste: $('#mPoste').value.trim(), _on: true });
+  e.target.reset();
+  $('#mEmail').focus();
+  saveRecipients();
+});
+
+const columns = () => {
+  const cols = new Set(['email', 'nom', 'entreprise', 'poste']);
+  recipients.forEach((r) => Object.keys(r).forEach((k) => k !== '_on' && cols.add(k)));
+  return [...cols];
+};
+
+function saveRecipients() {
+  store.set('recipients', recipients);
+  renderRecipients();
+}
+
+function renderRecipients() {
+  const cols = columns();
+  const table = $('#recipientsTable');
+  table.querySelector('thead').innerHTML =
+    '<tr><th></th>' + cols.map((c) => `<th>${escapeHtml(c)}</th>`).join('') + '<th></th></tr>';
+  table.querySelector('tbody').innerHTML = recipients
+    .map((r, i) =>
+      `<tr class="${r._on ? '' : 'off'}"><td><input type="checkbox" data-i="${i}" ${r._on ? 'checked' : ''}></td>` +
+      cols.map((c) => `<td contenteditable="true" data-i="${i}" data-c="${escapeHtml(c)}">${escapeHtml(r[c] || '')}</td>`).join('') +
+      `<td><button class="link danger" data-del="${i}" title="Retirer">✕</button></td></tr>`)
+    .join('');
+  $('#noRecipients').classList.toggle('hidden', recipients.length > 0);
+  const on = recipients.filter((r) => r._on).length;
+  $('#recipientCount').textContent = on + (on !== recipients.length ? ' / ' + recipients.length : '');
+  $('#sendAll').textContent = `Envoyer à ${on} destinataire${on > 1 ? 's' : ''}`;
+  $('#varsInfo').innerHTML = 'Variables : ' + cols.map((c) => `<code>{{${escapeHtml(c)}}}</code>`).join(' ');
+  $('#insertVar').innerHTML = '<option value="">{{ }} Variable</option>' + cols.map((c) => `<option>${escapeHtml(c)}</option>`).join('');
+  renderPreviewRecipients();
+}
+
+$('#recipientsTable').addEventListener('change', (e) => {
+  if (e.target.dataset.i != null && e.target.type === 'checkbox') {
+    recipients[e.target.dataset.i]._on = e.target.checked;
+    saveRecipients();
+  }
+});
+$('#recipientsTable').addEventListener('click', (e) => {
+  const del = e.target.dataset.del;
+  if (del != null) { recipients.splice(+del, 1); saveRecipients(); }
+});
+$('#recipientsTable').addEventListener('focusout', (e) => {
+  const { i, c } = e.target.dataset;
+  if (i == null || !c) return;
+  const v = e.target.textContent.trim();
+  recipients[i][c] = c === 'email' ? v.toLowerCase() : v;
+  store.set('recipients', recipients);
+  if (c === 'email' && !EMAIL_RE.test(recipients[i].email)) toast('Attention : adresse invalide sur la ligne ' + (+i + 1), 'error');
+});
+$('#selectAll').addEventListener('click', () => {
+  const all = recipients.every((r) => r._on);
+  recipients.forEach((r) => (r._on = !all));
+  saveRecipients();
+});
+$('#clearRecipients').addEventListener('click', () => {
+  if (recipients.length && confirm('Vider toute la liste des destinataires ?')) { recipients = []; saveRecipients(); }
+});
+
+// ---------- Pièces jointes ----------
+async function renderCvs(list) {
+  list = list || (await api('/api/cv'));
+  // Le premier fichier ajouté est coché par défaut.
+  if (!selectedCvs.size && list.length) selectedCvs.add(list[0].id);
+  selectedCvs = new Set([...selectedCvs].filter((id) => list.some((f) => f.id === id)));
+  store.set('selectedCvs', [...selectedCvs]);
+  $('#cvList').innerHTML = list.length
+    ? list.map((f) => `<li><label><input type="checkbox" data-cv="${escapeHtml(f.id)}" ${selectedCvs.has(f.id) ? 'checked' : ''}>
+        📎 ${escapeHtml(f.name)} <span class="muted">(${(f.size / 1024).toFixed(0)} Ko)</span></label>
+        <button class="link danger" data-cvdel="${escapeHtml(f.id)}">Supprimer</button></li>`).join('')
+    : '<li class="muted">Aucun fichier. Ajoutez votre CV.</li>';
+}
+$('#cvInput').addEventListener('change', async (e) => {
+  const fd = new FormData();
+  [...e.target.files].forEach((f) => fd.append('files', f));
+  e.target.value = '';
+  try {
+    const list = await api('/api/cv', { method: 'POST', body: fd });
+    list.slice(-fd.getAll('files').length).forEach((f) => selectedCvs.add(f.id));
+    renderCvs(list);
+    toast('Fichier ajouté.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
+});
+$('#cvList').addEventListener('change', (e) => {
+  const id = e.target.dataset.cv;
+  if (!id) return;
+  e.target.checked ? selectedCvs.add(id) : selectedCvs.delete(id);
+  store.set('selectedCvs', [...selectedCvs]);
+});
+$('#cvList').addEventListener('click', async (e) => {
+  const id = e.target.dataset.cvdel;
+  if (id && confirm('Supprimer ce fichier ?')) renderCvs(await api('/api/cv/' + encodeURIComponent(id), { method: 'DELETE' }));
+});
+
+// ---------- Éditeur ----------
+const editor = $('#editor');
+const source = $('#htmlSource');
+let mode = 'visual';
+
+editor.innerHTML = store.get('html', DEFAULT_HTML);
+$('#subject').value = store.get('subject', DEFAULT_SUBJECT);
+
+const getHtml = () => (mode === 'html' ? source.value : editor.innerHTML);
+function setHtml(html) {
+  editor.innerHTML = html;
+  source.value = html;
+  saveDraft();
+}
+function saveDraft() {
+  store.set('html', getHtml());
+  store.set('subject', $('#subject').value);
+}
+editor.addEventListener('input', saveDraft);
+source.addEventListener('input', saveDraft);
+$('#subject').addEventListener('input', saveDraft);
+
+function setMode(m) {
+  if (mode === 'html' && m !== 'html') editor.innerHTML = source.value;
+  if (m === 'html') source.value = formatHtml(editor.innerHTML);
+  mode = m === 'preview' ? (mode === 'html' ? 'html' : 'visual') : m;
+  $$('.etab').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
+  editor.classList.toggle('hidden', m !== 'visual');
+  source.classList.toggle('hidden', m !== 'html');
+  $('#toolbar').classList.toggle('disabled', m !== 'visual');
+  $('#previewPane').classList.toggle('hidden', m !== 'preview');
+  if (m === 'preview') renderPreview();
+}
+$$('.etab').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+// Indentation légère pour la vue HTML.
+const formatHtml = (html) => html.replace(/>\s*(<(p|h\d|ul|ol|li|div|table|tr|br)\b)/gi, '>\n$1').trim();
+
+$('#toolbar').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-cmd]');
+  if (!btn) return;
+  e.preventDefault();
+  const cmd = btn.dataset.cmd;
+  let arg = null;
+  if (cmd === 'createLink') {
+    arg = prompt('Adresse du lien (https://…, mailto:…) :');
+    if (!arg) return;
+  }
+  editor.focus();
+  document.execCommand(cmd, false, arg);
+  saveDraft();
+});
+$('#toolbar').addEventListener('change', (e) => {
+  const cmd = e.target.dataset.cmd;
+  if (cmd) {
+    editor.focus();
+    document.execCommand(cmd, false, cmd === 'formatBlock' ? `<${e.target.value}>` : e.target.value);
+    saveDraft();
+  }
+});
+// Empêche les boutons de voler la sélection de l'éditeur.
+$('#toolbar').addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+
+$('#insertVar').addEventListener('change', (e) => {
+  if (!e.target.value) return;
+  restoreSelection();
+  document.execCommand('insertText', false, `{{${e.target.value}}}`);
+  e.target.value = '';
+  saveDraft();
+});
+
+// Mémorise la position du curseur pour insérer l'image au bon endroit
+// (la boîte de sélection de fichier fait perdre la sélection).
+let savedRange = null;
+document.addEventListener('selectionchange', () => {
+  const sel = getSelection();
+  if (sel.rangeCount && editor.contains(sel.anchorNode)) savedRange = sel.getRangeAt(0).cloneRange();
+});
+function restoreSelection() {
+  editor.focus();
+  if (savedRange) { const sel = getSelection(); sel.removeAllRanges(); sel.addRange(savedRange); }
+}
+
+function insertImage(url) {
+  restoreSelection();
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = '';
+  img.style.cssText = 'max-width:100%;height:auto';
+  const sel = getSelection();
+  if (sel.rangeCount && editor.contains(sel.anchorNode)) {
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    range.insertNode(img);
+    range.setStartAfter(img);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } else editor.appendChild(img);
+  saveDraft();
+}
+async function uploadImage(file) {
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const { url } = await api('/api/images', { method: 'POST', body: fd });
+    insertImage(url);
+  } catch (err) { toast(err.message, 'error'); }
+}
+$('#imgUploadBtn').addEventListener('click', (e) => { e.preventDefault(); $('#imgInput').click(); });
+$('#imgInput').addEventListener('change', (e) => { if (e.target.files[0]) uploadImage(e.target.files[0]); e.target.value = ''; });
+$('#imgUrlBtn').addEventListener('click', (e) => {
+  e.preventDefault();
+  const url = prompt("URL de l'image (https://…) :");
+  if (url) insertImage(url);
+});
+// Coller / glisser une image directement dans l'éditeur.
+editor.addEventListener('paste', (e) => {
+  const img = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith('image/'));
+  if (img) { e.preventDefault(); uploadImage(img); }
+});
+editor.addEventListener('drop', (e) => {
+  const img = [...(e.dataTransfer?.files || [])].find((f) => f.type.startsWith('image/'));
+  if (img) { e.preventDefault(); uploadImage(img); }
+});
+// Double-clic sur une image : changer sa largeur.
+editor.addEventListener('dblclick', (e) => {
+  if (e.target.tagName !== 'IMG') return;
+  const w = prompt('Largeur de l\'image en pixels (vide = taille d\'origine) :', e.target.style.width.replace('px', ''));
+  if (w === null) return;
+  e.target.style.width = w ? `${parseInt(w, 10)}px` : '';
+  saveDraft();
+});
+
+// ---------- Aperçu ----------
+function fillVars(text, vars, html) {
+  const lower = {};
+  for (const [k, v] of Object.entries(vars || {})) lower[k.toLowerCase()] = v ?? '';
+  return text.replace(/\{\{\s*([\w\-À-ÿ]+)\s*\}\}/g, (_, key) => {
+    const v = lower[key.toLowerCase()];
+    if (v === undefined || v === '') return html ? `<mark title="variable vide">{{${key}}}</mark>` : `{{${key}}}`;
+    return html ? escapeHtml(v) : v;
+  });
+}
+function renderPreviewRecipients() {
+  const sel = $('#previewRecipient');
+  const prev = sel.value;
+  sel.innerHTML = recipients.length
+    ? recipients.map((r, i) => `<option value="${i}">${escapeHtml(r.email)}${r.entreprise ? ' – ' + escapeHtml(r.entreprise) : ''}</option>`).join('')
+    : '<option value="">(exemple)</option>';
+  if (prev && sel.querySelector(`option[value="${prev}"]`)) sel.value = prev;
+}
+function renderPreview() {
+  const r = recipients[$('#previewRecipient').value] || { nom: 'Mme Dupont', entreprise: 'Exemple SA', poste: 'Développeur', email: 'rh@exemple.fr' };
+  $('#previewSubject').textContent = fillVars($('#subject').value, r, false);
+  $('#previewFrame').srcdoc = `<base href="${location.origin}/"><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222;margin:16px">${fillVars(getHtml(), r, true)}</body>`;
+}
+$('#previewRecipient').addEventListener('change', renderPreview);
+
+// ---------- Modèles ----------
+let templates = [];
+async function loadTemplates(list) {
+  templates = list || (await api('/api/templates'));
+  const sel = $('#templateSelect');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Modèles enregistrés —</option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
+  sel.value = templates.some((t) => t.name === cur) ? cur : '';
+  $('#deleteTemplate').classList.toggle('hidden', !sel.value);
+}
+$('#templateSelect').addEventListener('change', (e) => {
+  const t = templates.find((x) => x.name === e.target.value);
+  $('#deleteTemplate').classList.toggle('hidden', !t);
+  if (!t) return;
+  $('#subject').value = t.subject;
+  setHtml(t.html);
+  if (mode === 'html') source.value = formatHtml(t.html);
+  toast(`Modèle « ${t.name} » chargé.`);
+});
+$('#saveTemplate').addEventListener('click', async () => {
+  const name = prompt('Nom du modèle :', $('#templateSelect').value || '');
+  if (!name) return;
+  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, subject: $('#subject').value, html: getHtml() } }));
+  $('#templateSelect').value = name;
+  $('#deleteTemplate').classList.remove('hidden');
+  toast('Modèle enregistré.', 'ok');
+});
+$('#deleteTemplate').addEventListener('click', async () => {
+  const name = $('#templateSelect').value;
+  if (name && confirm(`Supprimer le modèle « ${name} » ?`)) {
+    $('#templateSelect').value = '';
+    loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' }));
+  }
+});
+
+// ---------- Envoi ----------
+let currentJob = null;
+async function startSend(testTo) {
+  saveDraft();
+  const html = getHtml();
+  const list = recipients.filter((r) => r._on).map(({ _on, ...r }) => r);
+  if (!$('#subject').value.trim()) return toast("Renseignez l'objet du mail.", 'error');
+  if (!testTo && !list.length) return toast('Aucun destinataire sélectionné.', 'error');
+  if (!selectedCvs.size && !confirm('Aucune pièce jointe sélectionnée. Envoyer quand même ?')) return;
+  if (!testTo && !confirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`)) return;
+  try {
+    const { jobId, total } = await api('/api/send', {
+      method: 'POST',
+      body: { subject: $('#subject').value, html, recipients: list, cvIds: [...selectedCvs], testTo: testTo || undefined },
+    });
+    currentJob = jobId;
+    $('#progress').classList.remove('hidden');
+    $('#jobResults').innerHTML = '';
+    $('#sendAll').disabled = $('#sendTest').disabled = true;
+    pollJob(jobId, total);
+  } catch (err) { toast(err.message, 'error'); }
+}
+async function pollJob(id, total) {
+  const job = await api('/api/jobs/' + id).catch(() => null);
+  if (!job || id !== currentJob) return;
+  const n = job.sent + job.failed;
+  $('#progressBar').style.width = `${Math.round((n / total) * 100)}%`;
+  $('#progressText').textContent = `${n} / ${total} traité(s) · ${job.sent} envoyé(s) · ${job.failed} échec(s)` + (job.done ? (job.cancelled ? ' · arrêté' : ' · terminé') : '…');
+  $('#jobResults').innerHTML = job.results
+    .map((r) => `<li class="${r.status === 'envoyé' ? 'ok' : 'error'}">${r.status === 'envoyé' ? '✓' : '✕'} ${escapeHtml(r.email)}${r.error ? ' – ' + escapeHtml(r.error) : ''}</li>`)
+    .join('');
+  $('#cancelJob').classList.toggle('hidden', job.done);
+  if (job.done) {
+    $('#sendAll').disabled = $('#sendTest').disabled = false;
+    toast(job.failed ? `Terminé avec ${job.failed} échec(s).` : 'Envoi terminé.', job.failed ? 'error' : 'ok');
+  } else setTimeout(() => pollJob(id, total), 1000);
+}
+$('#sendAll').addEventListener('click', () => startSend());
+$('#sendTest').addEventListener('click', () => {
+  const to = $('#testTo').value.trim();
+  if (!EMAIL_RE.test(to)) return toast('Saisissez votre adresse pour le test.', 'error');
+  store.set('testTo', to);
+  startSend(to);
+});
+$('#cancelJob').addEventListener('click', () => currentJob && api(`/api/jobs/${currentJob}/cancel`, { method: 'POST' }));
+
+// ---------- Historique ----------
+let history = [];
+async function loadHistory() {
+  history = await api('/api/history');
+  $('#historyTable tbody').innerHTML = history.length
+    ? history.map((h) => `<tr><td>${new Date(h.at).toLocaleString('fr-FR')}</td><td>${escapeHtml(h.email)}</td>
+        <td>${escapeHtml(h.entreprise)}</td><td>${escapeHtml(h.subject)}</td>
+        <td class="${h.status === 'envoyé' ? 'ok' : 'error'}" title="${escapeHtml(h.error || '')}">${escapeHtml(h.status)}${h.dryRun ? ' (simulation)' : ''}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="muted center">Aucun envoi pour le moment.</td></tr>';
+}
+$('#clearHistory').addEventListener('click', async () => {
+  if (confirm("Effacer tout l'historique ?")) { await api('/api/history', { method: 'DELETE' }); loadHistory(); }
+});
+$('#exportHistory').addEventListener('click', () => {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = ['date;email;entreprise;objet;statut;erreur', ...history.map((h) => [h.at, h.email, h.entreprise, h.subject, h.status, h.error].map(q).join(';'))].join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+  a.download = 'historique-candidatures.csv';
+  a.click();
+});
+
+// ---------- Réglages ----------
+const PRESETS = {
+  gmail: { host: 'smtp.gmail.com', port: 465, secure: true },
+  outlook: { host: 'smtp-mail.outlook.com', port: 587, secure: false },
+  yahoo: { host: 'smtp.mail.yahoo.com', port: 465, secure: true },
+};
+const form = $('#settingsForm');
+async function loadSettings() {
+  const s = await api('/api/settings');
+  for (const [k, v] of Object.entries(s)) {
+    const el = form.elements[k];
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
+  }
+  $('#dryBadge').classList.toggle('hidden', !s.dryRun);
+  if (!$('#testTo').value) $('#testTo').value = store.get('testTo', s.fromEmail || s.user || '');
+}
+$$('[data-preset]').forEach((b) =>
+  b.addEventListener('click', () => {
+    const p = PRESETS[b.dataset.preset];
+    form.elements.host.value = p.host;
+    form.elements.port.value = p.port;
+    form.elements.secure.checked = p.secure;
+  })
+);
+const settingsBody = () => {
+  const o = {};
+  for (const el of form.elements) if (el.name) o[el.name] = el.type === 'checkbox' ? el.checked : el.value;
+  return o;
+};
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try { await api('/api/settings', { method: 'POST', body: settingsBody() }); toast('Réglages enregistrés.', 'ok'); loadSettings(); }
+  catch (err) { toast(err.message, 'error'); }
+});
+$('#testSmtp').addEventListener('click', async () => {
+  try {
+    await api('/api/settings', { method: 'POST', body: settingsBody() });
+    const r = await api('/api/settings/test', { method: 'POST' });
+    toast(r.message, 'ok');
+  } catch (err) { toast('Échec : ' + err.message, 'error'); }
+});
+
+// ---------- Démarrage ----------
+renderRecipients();
+renderCvs();
+loadTemplates();
+loadSettings();

@@ -1,0 +1,27 @@
+# Déploiement en un clic sur Render : New + > Blueprint > choisir ce dépôt.
+services:
+  - type: web
+    name: cv-sender
+    runtime: node
+    # Les offres gratuites de Render bloquent l'envoi SMTP (ports 465/587) : il faut au moins "starter".
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /healthz
+    disk:
+      name: cv-sender-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: STORAGE_DIR
+        value: /var/data
+      - key: APP_PASSWORD
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: FROM_NAME
+        sync: false

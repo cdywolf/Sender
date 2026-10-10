@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CV Sender</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">✉️ CV Sender</div>
+  <nav>
+    <button class="tab active" data-view="campaign">Campagne</button>
+    <button class="tab" data-view="history">Historique</button>
+    <button class="tab" data-view="settings">Réglages</button>
+  </nav>
+  <span id="dryBadge" class="badge warn hidden">Mode simulation</span>
+</header>
+
+<main>
+  <!-- ================= CAMPAGNE ================= -->
+  <section id="view-campaign" class="view">
+    <div class="grid">
+      <div class="col">
+        <div class="card">
+          <h2>1. Destinataires <span id="recipientCount" class="pill">0</span></h2>
+          <label class="drop" id="csvDrop">
+            <input type="file" id="csvInput" accept=".csv,text/csv,.txt" hidden>
+            <strong>Importer un CSV</strong>
+            <span>Glissez un fichier ici ou cliquez. Une colonne <code>email</code> est requise ;
+              les autres colonnes (nom, entreprise, poste…) deviennent des variables.</span>
+          </label>
+          <form id="manualForm" class="row wrap">
+            <input type="email" id="mEmail" placeholder="email@entreprise.com" required>
+            <input type="text" id="mNom" placeholder="Nom du recruteur">
+            <input type="text" id="mEntreprise" placeholder="Entreprise">
+            <input type="text" id="mPoste" placeholder="Poste visé">
+            <button type="submit" class="btn">Ajouter</button>
+          </form>
+          <div class="row between small">
+            <span id="varsInfo" class="muted"></span>
+            <span>
+              <button class="link" id="selectAll">Tout cocher</button> ·
+              <button class="link" id="clearRecipients">Vider la liste</button>
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table id="recipientsTable"><thead></thead><tbody></tbody></table>
+            <p id="noRecipients" class="muted center">Aucun destinataire pour l'instant.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>2. Pièces jointes (CV, lettre…)</h2>
+          <label class="drop small-drop">
+            <input type="file" id="cvInput" multiple hidden accept=".pdf,.doc,.docx,.odt,.png,.jpg,.jpeg">
+            <strong>Ajouter un fichier</strong> <span>PDF recommandé, 15 Mo max.</span>
+          </label>
+          <ul id="cvList" class="file-list"></ul>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card">
+          <h2>3. Message</h2>
+          <div class="row wrap">
+            <select id="templateSelect"><option value="">— Modèles enregistrés —</option></select>
+            <button class="btn ghost" id="saveTemplate">Enregistrer comme modèle</button>
+            <button class="btn ghost danger hidden" id="deleteTemplate">Supprimer</button>
+          </div>
+          <input type="text" id="subject" class="full" placeholder="Objet, ex. : Candidature spontanée – {{poste}} chez {{entreprise}}">
+
+          <div class="editor-tabs">
+            <button class="etab active" data-mode="visual">Éditeur visuel</button>
+            <button class="etab" data-mode="html">HTML</button>
+            <button class="etab" data-mode="preview">Aperçu</button>
+          </div>
+
+          <div id="toolbar" class="toolbar">
+            <select data-cmd="formatBlock" title="Style">
+              <option value="p">Paragraphe</option><option value="h2">Titre</option><option value="h3">Sous-titre</option>
+            </select>
+            <button data-cmd="bold" title="Gras"><b>G</b></button>
+            <button data-cmd="italic" title="Italique"><i>I</i></button>
+            <button data-cmd="underline" title="Souligné"><u>S</u></button>
+            <input type="color" data-cmd="foreColor" title="Couleur du texte" value="#1a56db">
+            <button data-cmd="insertUnorderedList" title="Liste à puces">• Liste</button>
+            <button data-cmd="insertOrderedList" title="Liste numérotée">1. Liste</button>
+            <button data-cmd="justifyLeft" title="Aligner à gauche">Gauche</button>
+            <button data-cmd="justifyCenter" title="Centrer">Centrer</button>
+            <button data-cmd="createLink" title="Lien">🔗</button>
+            <button id="imgUploadBtn" title="Insérer une image depuis l'ordinateur">🖼️ Image</button>
+            <button id="imgUrlBtn" title="Insérer une image depuis une URL">🌐 Image URL</button>
+            <button data-cmd="removeFormat" title="Effacer la mise en forme">⌫</button>
+            <select id="insertVar" title="Insérer une variable"><option value="">{{ }} Variable</option></select>
+            <input type="file" id="imgInput" accept="image/*" hidden>
+          </div>
+
+          <div id="editor" class="editor" contenteditable="true"></div>
+          <textarea id="htmlSource" class="editor code hidden" spellcheck="false"></textarea>
+          <div id="previewPane" class="hidden">
+            <div class="row small">
+              <label>Aperçu pour :</label>
+              <select id="previewRecipient"></select>
+            </div>
+            <div class="preview-subject"><span class="muted">Objet :</span> <strong id="previewSubject"></strong></div>
+            <iframe id="previewFrame" title="Aperçu du mail"></iframe>
+          </div>
+          <p class="muted small">Astuce : utilisez <code>{{nom}}</code>, <code>{{entreprise}}</code>, <code>{{poste}}</code>
+            ou toute colonne de votre CSV. Les images importées sont intégrées au mail.</p>
+        </div>
+
+        <div class="card">
+          <h2>4. Envoi</h2>
+          <div class="row wrap">
+            <input type="email" id="testTo" placeholder="Votre adresse pour un test">
+            <button class="btn ghost" id="sendTest">Envoyer un test</button>
+            <button class="btn primary" id="sendAll">Envoyer à 0 destinataire</button>
+          </div>
+          <div id="progress" class="hidden">
+            <div class="bar"><div id="progressBar"></div></div>
+            <div class="row between small">
+              <span id="progressText"></span>
+              <button class="link danger" id="cancelJob">Arrêter</button>
+            </div>
+            <ul id="jobResults" class="results"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= HISTORIQUE ================= -->
+  <section id="view-history" class="view hidden">
+    <div class="card">
+      <div class="row between">
+        <h2>Historique des envois</h2>
+        <span><button class="btn ghost" id="exportHistory">Exporter CSV</button>
+        <button class="btn ghost danger" id="clearHistory">Effacer</button></span>
+      </div>
+      <div class="table-wrap">
+        <table id="historyTable">
+          <thead><tr><th>Date</th><th>Destinataire</th><th>Entreprise</th><th>Objet</th><th>Statut</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= RÉGLAGES ================= -->
+  <section id="view-settings" class="view hidden">
+    <div class="card narrow">
+      <h2>Compte d'envoi (SMTP)</h2>
+      <div class="row wrap">
+        <span class="muted small">Préréglages :</span>
+        <button class="btn ghost" data-preset="gmail">Gmail</button>
+        <button class="btn ghost" data-preset="outlook">Outlook / Hotmail</button>
+        <button class="btn ghost" data-preset="yahoo">Yahoo</button>
+      </div>
+      <form id="settingsForm" class="form">
+        <label>Serveur SMTP <input name="host" required></label>
+        <div class="row">
+          <label>Port <input name="port" type="number" required></label>
+          <label class="check"><input name="secure" type="checkbox"> SSL/TLS (port 465)</label>
+        </div>
+        <label>Identifiant (adresse e-mail) <input name="user" autocomplete="username"></label>
+        <label>Mot de passe d'application <input name="pass" type="password" autocomplete="current-password"></label>
+        <p class="muted small">Pour Gmail, créez un « mot de passe d'application » (compte Google → Sécurité →
+          Validation en deux étapes → Mots de passe des applications). Votre mot de passe habituel ne fonctionnera pas.</p>
+        <label>Nom affiché <input name="fromName" placeholder="Prénom Nom"></label>
+        <label>Adresse d'expédition <input name="fromEmail" type="email" placeholder="par défaut : l'identifiant"></label>
+        <label>Répondre à (optionnel) <input name="replyTo" type="email"></label>
+        <label>Pause entre deux envois (secondes) <input name="delaySeconds" type="number" min="0"></label>
+        <p class="muted small">Une pause de 5 à 15 s limite le risque d'être classé en spam. Gmail limite à environ 500 envois par jour.</p>
+        <div class="row">
+          <button class="btn primary" type="submit">Enregistrer</button>
+          <button class="btn ghost" type="button" id="testSmtp">Tester la connexion</button>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>

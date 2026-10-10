@@ -1,0 +1,17 @@
+{
+  "name": "cv-sender",
+  "version": "1.0.0",
+  "description": "Plateforme locale d'envoi de candidatures (CV) à des recruteurs, avec import CSV et éditeur HTML.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dry": "DRY_RUN=1 node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.6"
+  }
+}
