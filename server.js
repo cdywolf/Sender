@@ -1,4 +1,4 @@
-// CV Sender : serveur local d'envoi de candidatures par e-mail (SMTP).
+// Sender : serveur local d'envoi de candidatures par e-mail (SMTP).
 const express = require('express');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
@@ -68,7 +68,7 @@ if (APP_PASSWORD) {
       const given = crypto.createHash('sha256').update(pass).digest();
       if (crypto.timingSafeEqual(given, expected)) return next();
     }
-    res.set('WWW-Authenticate', 'Basic realm="CV Sender", charset="UTF-8"').status(401).send('Mot de passe requis.');
+    res.set('WWW-Authenticate', 'Basic realm="Sender", charset="UTF-8"').status(401).send('Mot de passe requis.');
   });
 }
 
@@ -288,7 +288,7 @@ function inlineImages(html) {
   const seen = new Map();
   let out = html.replace(/(<img\b[^>]*?\bsrc=)(["'])([^"']+)\2/gi, (m, pre, q, src) => {
     if (seen.has(src)) return `${pre}${q}cid:${seen.get(src)}${q}`;
-    const cid = crypto.randomBytes(6).toString('hex') + '@cv-sender';
+    const cid = crypto.randomBytes(6).toString('hex') + '@sender';
     const local = src.match(/^(?:https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?)?\/images\/([\w.\-]+)$/);
     const data = src.match(/^data:(image\/[\w+.\-]+);base64,(.+)$/);
     if (local) {
@@ -444,5 +444,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`CV Sender démarré : http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${DRY_RUN ? '  (mode simulation, aucun mail réel)' : ''}`);
+  console.log(`Sender démarré : http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${DRY_RUN ? '  (mode simulation, aucun mail réel)' : ''}`);
 });

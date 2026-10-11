@@ -1,4 +1,4 @@
-# CV Sender
+# Sender
 
 Petite plateforme locale pour envoyer votre CV à des recruteurs, avec un mail personnalisé par destinataire.
 
@@ -17,7 +17,7 @@ Tout tourne sur votre ordinateur : vos identifiants restent dans `data/settings.
 Prérequis : [Node.js](https://nodejs.org) 18 ou plus récent.
 
 ```bash
-cd cv-sender
+cd Sender
 npm install
 npm start
 ```
@@ -98,10 +98,10 @@ avec un petit disque pour garder vos CV, modèles et historique entre deux redé
 ### Avec Docker (n'importe quel hébergeur)
 
 ```bash
-docker build -t cv-sender .
-docker run -p 3000:3000 -v cv-sender-data:/data \
+docker build -t sender .
+docker run -p 3000:3000 -v sender-data:/data \
   -e APP_PASSWORD=monmotdepasse -e SMTP_USER=moi@gmail.com -e SMTP_PASS=xxxx -e FROM_NAME="Prénom Nom" \
-  cv-sender
+  sender
 ```
 
 ### Variables d'environnement

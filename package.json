@@ -1,5 +1,5 @@
 {
-  "name": "cv-sender",
+  "name": "sender",
   "version": "1.0.0",
   "description": "Plateforme locale d'envoi de candidatures (CV) à des recruteurs, avec import CSV et éditeur HTML.",
   "main": "server.js",

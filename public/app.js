@@ -1,4 +1,4 @@
-// CV Sender : interface (vanilla JS, aucune dépendance).
+// Sender : interface (vanilla JS, aucune dépendance).
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
