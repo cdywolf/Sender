@@ -18,7 +18,7 @@ function toast(msg, type = '') {
   t.textContent = msg;
   t.className = `toast ${type}`;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.add('hidden'), 4000);
+  toast.timer = setTimeout(() => t.classList.add('hidden'), type === 'error' ? 12000 : 4000);
 }
 
 const escapeHtml = (v) =>

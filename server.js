@@ -101,12 +101,38 @@ app.post('/api/settings', (req, res) => {
   res.json({ ok: true });
 });
 
+const isGmail = (host) => /(^|\.)(gmail|googlemail)\.com$/i.test(String(host || '').trim());
+
+// Identifiants tels qu'envoyés au serveur. Les mots de passe d'application Google
+// s'affichent en 4 groupes « abcd efgh ijkl mnop » : on retire les espaces.
+function smtpAuth(s) {
+  const user = String(s.user || '').trim();
+  const raw = String(s.pass || '');
+  const pass = isGmail(s.host) ? raw.replace(/\s+/g, '') : raw.trim();
+  return user ? { user, pass } : undefined;
+}
+
 function createTransport(s) {
   if (DRY_RUN) return nodemailer.createTransport({ streamTransport: true, buffer: true });
   return nodemailer.createTransport({
-    host: s.host, port: s.port, secure: s.secure,
-    auth: s.user ? { user: s.user, pass: s.pass } : undefined,
+    host: String(s.host || '').trim(), port: s.port, secure: s.secure,
+    auth: smtpAuth(s),
   });
+}
+
+// Message d'erreur lisible, sans jamais afficher le mot de passe.
+function smtpError(e, s) {
+  if (e && (e.code === 'EAUTH' || e.responseCode === 535)) {
+    const auth = smtpAuth(s) || { user: '(vide)', pass: '' };
+    let hint = `Identifiant ou mot de passe refusé par ${s.host}. Identifiant utilisé : « ${auth.user} », mot de passe de ${auth.pass.length} caractère(s).`;
+    if (isGmail(s.host)) {
+      hint += auth.pass.length === 16
+        ? " Vérifiez que ce code est bien un mot de passe d'application encore valide et que l'identifiant est l'adresse Gmail du compte qui l'a créé."
+        : " Gmail attend un mot de passe d'application de 16 lettres (myaccount.google.com/apppasswords), pas votre mot de passe habituel.";
+    }
+    return hint;
+  }
+  return e.message;
 }
 
 // ---------- Identités (comme dans Thunderbird) ----------
@@ -163,7 +189,7 @@ app.post('/api/identities/:id/test', async (req, res) => {
     await createTransport(identity.smtp || getSettings()).verify();
     res.json({ ok: true, message: 'Connexion réussie pour ' + identity.email + '.' });
   } catch (e) {
-    res.status(400).json({ ok: false, message: e.message });
+    res.status(400).json({ ok: false, message: smtpError(e, identity.smtp || getSettings()) });
   }
 });
 
@@ -173,7 +199,7 @@ app.post('/api/settings/test', async (req, res) => {
     await createTransport(getSettings()).verify();
     res.json({ ok: true, message: 'Connexion SMTP réussie.' });
   } catch (e) {
-    res.status(400).json({ ok: false, message: e.message });
+    res.status(400).json({ ok: false, message: smtpError(e, getSettings()) });
   }
 });
 
@@ -388,7 +414,7 @@ app.post('/api/send', (req, res) => {
         job.sent++;
       } catch (e) {
         entry.status = 'échec';
-        entry.error = e.message;
+        entry.error = smtpError(e, s);
         job.failed++;
       }
       job.results.push(entry);

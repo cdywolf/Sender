@@ -225,8 +225,8 @@
           <label>Port <input name="port" type="number" required></label>
           <label class="check"><input name="secure" type="checkbox"> SSL/TLS (port 465)</label>
         </div>
-        <label>Identifiant (adresse e-mail) <input name="user" autocomplete="username"></label>
-        <label>Mot de passe d'application <input name="pass" type="password" autocomplete="current-password"></label>
+        <label>Identifiant (adresse e-mail) <input name="user" type="email" autocomplete="off" spellcheck="false"></label>
+        <label>Mot de passe d'application <input name="pass" type="password" autocomplete="new-password" spellcheck="false"></label>
         <p class="muted small">Pour Gmail, créez un « mot de passe d'application » (compte Google → Sécurité →
           Validation en deux étapes → Mots de passe des applications). Votre mot de passe habituel ne fonctionnera pas.</p>
         <label>Nom affiché par défaut <input name="fromName"></label>
