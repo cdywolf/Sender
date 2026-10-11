@@ -1,4 +1,4 @@
-// CV Sender : interface (vanilla JS, aucune dépendance).
+// Sender : interface (vanilla JS, aucune dépendance).
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
@@ -18,7 +18,7 @@ function toast(msg, type = '') {
   t.textContent = msg;
   t.className = `toast ${type}`;
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => t.classList.add('hidden'), 4000);
+  toast.timer = setTimeout(() => t.classList.add('hidden'), type === 'error' ? 12000 : 4000);
 }
 
 const escapeHtml = (v) =>
