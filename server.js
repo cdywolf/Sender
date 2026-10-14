@@ -319,11 +319,21 @@ function htmlToText(html) {
     .trim();
 }
 
-function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature }) {
+function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature, textOnly }) {
   const body = signature ? `${html}<div style="margin-top:20px">${signature}</div>` : html;
   const filled = fillVars(body, vars, true);
-  const wrapped = `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">${filled}</body></html>`;
-  const { html: finalHtml, attachments } = inlineImages(wrapped);
+  const text = htmlToText(filled);
+
+  // Mode texte brut : aucun contenu HTML, uniquement la version texte. Les images intégrées
+  // sont ignorées (elles n'ont pas de sens en texte) ; les pièces jointes (CV…) sont conservées.
+  const attachments = [];
+  let finalHtml;
+  if (!textOnly) {
+    const wrapped = `<!doctype html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#222">${filled}</body></html>`;
+    const inlined = inlineImages(wrapped);
+    finalHtml = inlined.html;
+    attachments.push(...inlined.attachments);
+  }
   for (const id of cvIds || []) {
     const file = path.join(CV_DIR, path.basename(id));
     if (fs.existsSync(file)) attachments.push({ filename: id.replace(/^\d+__/, ''), path: file });
@@ -335,8 +345,8 @@ function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature })
     cc: cc && cc.length ? cc : undefined,
     bcc: bcc && bcc.length ? bcc : undefined,
     subject: fillVars(subject, vars, false),
-    html: finalHtml,
-    text: htmlToText(filled),
+    ...(textOnly ? {} : { html: finalHtml }),
+    text,
     attachments,
   };
 }
@@ -348,6 +358,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 app.post('/api/send', (req, res) => {
   const settings = getSettings();
   const { subject, html, recipients, cvIds, testTo } = req.body || {};
+  const textOnly = req.body.textOnly === true || req.body.textOnly === 'true';
   if (!subject || !html) return res.status(400).json({ message: 'Objet et contenu requis.' });
 
   // En-têtes propres à ce mail ; vides = valeurs des Réglages.
@@ -402,7 +413,7 @@ app.post('/api/send', (req, res) => {
       if (job.cancelled) break;
       const entry = { email: r.email, entreprise: r.entreprise || r.company || '', at: new Date().toISOString() };
       try {
-        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc, signature: identity ? identity.signature : '' }));
+        const info = await transport.sendMail(buildMessage(s, { subject, html, vars: r, to: r.email, cvIds, cc, bcc, signature: identity ? identity.signature : '', textOnly }));
         if (DRY_RUN) {
           // Simulation : le mail est enregistré en .eml (ouvrable dans Thunderbird/Outlook) au lieu d'être envoyé.
           const file = path.join(OUTBOX_DIR, `${Date.now()}_${r.email.replace(/[^\w.@-]/g, '_')}.eml`);

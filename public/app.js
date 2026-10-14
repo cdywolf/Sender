@@ -602,6 +602,7 @@ async function startSend(testTo) {
             ? { fromName: $('#fromName').value.trim(), fromEmail: $('#fromEmail').value.trim() }
             : {}),
         replyTo: $('#replyTo').value.trim(), cc: $('#cc').value.trim(), bcc: $('#bcc').value.trim(),
+        textOnly: $('#textOnly') && $('#textOnly').checked,
       },
     });
     currentJob = jobId;
