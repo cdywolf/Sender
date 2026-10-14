@@ -285,7 +285,7 @@ function saveDraft() {
 editor.addEventListener('input', () => {
   // Synchronise l'éditeur visuel vers la source HTML
   if (mode === 'visual') {
-    source.value = formatHtml(editor.innerHTML);
+    source.value = editor.innerHTML;
   }
   saveDraft();
 });
