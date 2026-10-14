@@ -282,8 +282,21 @@ function saveDraft() {
   store.set('html', getHtml());
   HEADER_FIELDS.forEach((id) => store.set(id, $('#' + id).value));
 }
-editor.addEventListener('input', saveDraft);
-source.addEventListener('input', saveDraft);
+editor.addEventListener('input', () => {
+  // Synchronise l'éditeur visuel vers la source HTML
+  if (mode === 'visual') {
+    source.value = formatHtml(editor.innerHTML);
+  }
+  saveDraft();
+});
+
+source.addEventListener('input', () => {
+  // Synchronise la source HTML vers l'éditeur visuel
+  if (mode === 'html') {
+    editor.innerHTML = source.value;
+  }
+  saveDraft();
+});
 HEADER_FIELDS.forEach((id) => $('#' + id).addEventListener('input', saveDraft));
 
 // ---------- Identités ----------
