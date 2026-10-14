@@ -5,6 +5,7 @@ Petite plateforme locale pour envoyer votre CV à des recruteurs, avec un mail p
 - Import d'un **CSV** d'adresses RH, ou **saisie manuelle** d'une adresse
 - **Variables** dans l'objet et le message : `{{nom}}`, `{{entreprise}}`, `{{poste}}`… (toute colonne du CSV devient une variable)
 - **Éditeur visuel** (gras, couleurs, listes, liens, **images**) ou **édition HTML directe**, avec aperçu pour chaque destinataire
+- **Envoi en texte brut** (option) : envoie le mail sans mise en forme HTML ni images, utile pour un message sobre
 - **Pièces jointes** (CV, lettre de motivation…) ajoutées directement en écrivant le mail, bouton 📎 Joindre
 - **Identités** comme dans Thunderbird (nom, adresse, serveur d'envoi) à choisir dans « De », plus **Répondre à**, **Cc** et **Cci** pour chaque mail
 - Envoi d'un **mail de test** à soi-même, envoi groupé avec pause entre chaque mail, bouton « Arrêter »
