@@ -602,7 +602,7 @@ async function startSend(testTo) {
   const list = recipients.filter((r) => r._on).map(({ _on, ...r }) => r);
   if (!$('#subject').value.trim()) return toast("Renseignez l'objet du mail.", 'error');
   if (!testTo && !list.length) return toast('Aucun destinataire sélectionné.', 'error');
-  if (!attachments.length && !(await askConfirm("Aucune pièce jointe (CV). Envoyer quand même ?", 'Envoyer'))) return;
+  if (!attachments.length && !(await askConfirm("Aucune pièce jointe. Envoyer quand même ?", 'Envoyer'))) return;
   if (!testTo && !(await askConfirm(`Envoyer ce mail à ${list.length} destinataire(s) ?`, 'Envoyer'))) return;
   try {
     const { jobId, total } = await api('/api/send', {
