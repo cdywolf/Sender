@@ -137,3 +137,13 @@ td.ok { color: var(--ok); } td.error { color: var(--error); }
 .identity-list .actions { display: flex; gap: 12px; }
 #identitySelect { flex: 1 1 220px; min-width: 0; }
 .row label > input:not([type=checkbox]):not([type=radio]) { flex: none; }
+
+/* Écran de connexion */
+.login-page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-card { width: 100%; max-width: 340px; }
+.login-card .brand { text-align: center; margin-bottom: 4px; }
+.login-card .error { color: var(--error); margin: 0; }
+#logout { margin-left: auto; }
+#dryBadge:not(.hidden) + #logout { margin-left: 0; }
+a.btn { text-decoration: none; color: inherit; display: inline-block; }
+.stack > .card.narrow { width: 100%; }

@@ -15,6 +15,7 @@
     <button class="tab" data-view="settings">Réglages</button>
   </nav>
   <span id="dryBadge" class="badge warn hidden">Mode simulation</span>
+  <button id="logout" class="tab hidden">Se déconnecter</button>
 </header>
 
 <main>
@@ -242,6 +243,27 @@
           <button class="btn primary" type="submit">Enregistrer</button>
           <button class="btn ghost" type="button" id="testSmtp">Tester la connexion</button>
         </div>
+      </form>
+    </div>
+    <div class="card narrow">
+      <h2>Sauvegarde des modèles</h2>
+      <p class="muted small">Exportez vos modèles de mail, vos identités (avec leurs signatures) et les images qu'ils contiennent
+        dans un fichier, puis importez-le sur un autre ordinateur ou dans l'application de bureau pour les retrouver à l'identique.
+        Les mots de passe ne sont jamais exportés.</p>
+      <div class="row">
+        <a class="btn ghost" id="exportBackup" href="/api/export" download>Exporter</a>
+        <button class="btn ghost" type="button" id="importBackup">Importer un fichier…</button>
+        <input type="file" id="importFile" accept=".json,application/json" class="hidden">
+      </div>
+    </div>
+    <div class="card narrow hidden" id="accountCard">
+      <h2>Compte de connexion</h2>
+      <p class="muted small">Identifiant et mot de passe demandés à l'ouverture de l'application (par défaut : candy / candy).</p>
+      <form id="accountForm" class="form">
+        <label>Mot de passe actuel <input name="current" type="password" autocomplete="current-password" required></label>
+        <label>Identifiant <input name="user" autocomplete="username" required></label>
+        <label>Nouveau mot de passe <input name="pass" type="password" autocomplete="new-password" required></label>
+        <div class="row"><button class="btn primary" type="submit">Changer</button></div>
       </form>
     </div>
     </div>

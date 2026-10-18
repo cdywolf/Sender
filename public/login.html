@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sender · Connexion</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="login-page">
+  <form id="loginForm" class="card login-card form">
+    <div class="brand">✉️ Sender</div>
+    <label>Identifiant <input name="user" autocomplete="username" autofocus required></label>
+    <label>Mot de passe <input name="pass" type="password" autocomplete="current-password" required></label>
+    <p id="loginError" class="error small hidden"></p>
+    <button class="btn primary" type="submit">Se connecter</button>
+  </form>
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ user: f.user.value, pass: f.pass.value }),
+  });
+  if (res.ok) return location.replace('/');
+  const err = document.getElementById('loginError');
+  err.textContent = (await res.json().catch(() => ({}))).message || 'Connexion impossible.';
+  err.classList.remove('hidden');
+  f.pass.select();
+});
+</script>
+</body>
+</html>

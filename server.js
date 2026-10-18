@@ -11,6 +11,8 @@ const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
 const APP_PASSWORD = process.env.APP_PASSWORD || '';
 const DRY_RUN = (process.env.DRY_RUN || '').trim() === '1';
+// Écran de connexion (identifiant + mot de passe), activé par défaut dans l'application de bureau.
+const LOGIN = (process.env.LOGIN || '').trim() === '1';
 
 // STORAGE_DIR permet de pointer vers un disque persistant une fois déployé.
 const STORAGE_DIR = process.env.STORAGE_DIR || __dirname;
@@ -24,6 +26,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const TEMPLATES_FILE = path.join(DATA_DIR, 'templates.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
 const IDENTITIES_FILE = path.join(DATA_DIR, 'identities.json');
+const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
 
 const readJson = (file, fallback) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; }
@@ -72,7 +75,61 @@ if (APP_PASSWORD) {
   });
 }
 
-app.use(express.json({ limit: '25mb' }));
+// ---------- Connexion (identifiant / mot de passe) ----------
+// Compte par défaut : candy / candy, modifiable dans « Réglages ».
+const hashPass = (pass, salt) => crypto.scryptSync(String(pass), salt, 32).toString('hex');
+function readAuth() {
+  const a = readJson(AUTH_FILE, null);
+  if (a && a.user && a.salt && a.hash) return a;
+  const salt = crypto.randomBytes(16).toString('hex');
+  const def = { user: 'candy', salt, hash: hashPass('candy', salt) };
+  writeJson(AUTH_FILE, def);
+  return def;
+}
+const checkLogin = (user, pass) => {
+  const a = readAuth();
+  const given = Buffer.from(hashPass(pass, a.salt), 'hex');
+  return String(user).trim() === a.user && crypto.timingSafeEqual(given, Buffer.from(a.hash, 'hex'));
+};
+const sessions = new Set();
+const sessionId = (req) => {
+  const m = (req.headers.cookie || '').match(/(?:^|;\s*)sid=([a-f0-9]+)/);
+  return m && sessions.has(m[1]) ? m[1] : null;
+};
+
+if (LOGIN) {
+  app.post('/api/login', express.json(), (req, res) => {
+    const { user, pass } = req.body || {};
+    if (!checkLogin(user || '', pass || '')) return res.status(401).json({ message: 'Identifiant ou mot de passe incorrect.' });
+    const sid = crypto.randomBytes(24).toString('hex');
+    sessions.add(sid);
+    res.set('Set-Cookie', `sid=${sid}; HttpOnly; SameSite=Strict; Path=/`).json({ ok: true });
+  });
+  app.post('/api/logout', (req, res) => {
+    sessions.delete(sessionId(req));
+    res.set('Set-Cookie', 'sid=; Max-Age=0; Path=/').json({ ok: true });
+  });
+  app.use((req, res, next) => {
+    if (sessionId(req) || ['/login.html', '/style.css'].includes(req.path)) return next();
+    if (req.path.startsWith('/api/')) return res.status(401).json({ message: 'Session expirée, reconnectez-vous.' });
+    res.redirect('/login.html');
+  });
+}
+
+app.use(express.json({ limit: '100mb' }));
+app.get('/api/me', (req, res) => res.json({ login: LOGIN, user: LOGIN ? readAuth().user : '' }));
+app.post('/api/account', (req, res) => {
+  if (!LOGIN) return res.status(400).json({ message: 'Connexion désactivée.' });
+  const { current, user, pass } = req.body || {};
+  const a = readAuth();
+  if (!checkLogin(a.user, current || '')) return res.status(400).json({ message: 'Mot de passe actuel incorrect.' });
+  const name = String(user || '').trim();
+  if (!name || !pass) return res.status(400).json({ message: 'Identifiant et nouveau mot de passe requis.' });
+  const salt = crypto.randomBytes(16).toString('hex');
+  writeJson(AUTH_FILE, { user: name, salt, hash: hashPass(pass, salt) });
+  res.json({ ok: true });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/images', express.static(IMG_DIR));
 
@@ -262,6 +319,64 @@ app.delete('/api/templates/:name', (req, res) => {
   writeJson(TEMPLATES_FILE, list);
   res.json(list);
 });
+
+// ---------- Sauvegarde : export / import ----------
+// Un seul fichier JSON avec les modèles, les identités et les images qu'ils utilisent,
+// pour retrouver les mêmes modèles à l'identique sur un autre ordinateur ou dans l'application.
+// Les mots de passe SMTP ne sont jamais exportés.
+app.get('/api/export', (req, res) => {
+  const templates = readJson(TEMPLATES_FILE, []);
+  const identities = readIdentities().map((i) => ({ ...i, smtp: i.smtp ? { ...i.smtp, pass: '' } : null }));
+  const { pass, ...settings } = getSettings();
+  const used = JSON.stringify([templates, identities]);
+  const images = {};
+  for (const name of fs.readdirSync(IMG_DIR)) {
+    if (used.includes('/images/' + name)) images[name] = fs.readFileSync(path.join(IMG_DIR, name)).toString('base64');
+  }
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.set('Content-Disposition', `attachment; filename="sender-sauvegarde-${stamp}.json"`);
+  res.json({ app: 'sender', version: 1, exportedAt: new Date().toISOString(), templates, identities, settings, images });
+});
+
+function importBackup(b) {
+  if (!b || b.app !== 'sender') throw new Error("Ce fichier n'est pas une sauvegarde Sender.");
+  for (const [name, data] of Object.entries(b.images || {})) {
+    const file = path.join(IMG_DIR, path.basename(name));
+    if (!fs.existsSync(file)) fs.writeFileSync(file, Buffer.from(String(data), 'base64'));
+  }
+  // Modèles et identités : ceux du fichier remplacent ceux du même nom / même identifiant.
+  const incoming = Array.isArray(b.templates) ? b.templates.filter((t) => t && t.name) : [];
+  const names = new Set(incoming.map((t) => t.name));
+  writeJson(TEMPLATES_FILE, [...readJson(TEMPLATES_FILE, []).filter((t) => !names.has(t.name)), ...incoming]);
+  const current = readIdentities();
+  const ids = Array.isArray(b.identities) ? b.identities.filter((i) => i && i.id) : [];
+  const merged = current.map((i) => {
+    const n = ids.find((x) => x.id === i.id);
+    // On garde le mot de passe SMTP déjà saisi sur cet ordinateur.
+    return n ? { ...n, smtp: n.smtp ? { ...n.smtp, pass: (i.smtp && i.smtp.pass) || '' } : null } : i;
+  });
+  for (const n of ids) if (!current.some((i) => i.id === n.id)) merged.push(n);
+  writeJson(IDENTITIES_FILE, merged);
+  // Réglages : seulement s'il n'y en a pas encore ici (le mot de passe n'est jamais dans le fichier).
+  if (b.settings && !fs.existsSync(SETTINGS_FILE)) writeJson(SETTINGS_FILE, { ...b.settings, pass: '' });
+  return { templates: incoming.length, identities: ids.length };
+}
+
+app.post('/api/import', (req, res) => {
+  const counts = importBackup(req.body);
+  res.json({ ok: true, ...counts });
+});
+
+// Modèles livrés avec l'application : importés au premier lancement s'il n'y a encore aucun modèle.
+const SEED_FILE = process.env.SEED_FILE;
+if (SEED_FILE && fs.existsSync(SEED_FILE) && !fs.existsSync(TEMPLATES_FILE)) {
+  try {
+    const c = importBackup(JSON.parse(fs.readFileSync(SEED_FILE, 'utf8')));
+    console.log(`Modèles par défaut importés : ${c.templates} modèle(s), ${c.identities} identité(s).`);
+  } catch (e) {
+    console.error('Import des modèles par défaut impossible :', e.message);
+  }
+}
 
 // ---------- Historique ----------
 app.get('/api/history', (req, res) => res.json(readJson(HISTORY_FILE, []).slice(-1000).reverse()));
@@ -454,6 +569,11 @@ app.use((err, req, res, next) => {
   res.status(400).json({ message: err.message || 'Erreur' });
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`Sender démarré : http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${PORT}${DRY_RUN ? '  (mode simulation, aucun mail réel)' : ''}`);
+// L'application de bureau attend ce serveur (port choisi automatiquement avec PORT=0).
+module.exports = new Promise((resolve) => {
+  const server = app.listen(PORT, HOST, () => {
+    const port = server.address().port;
+    console.log(`Sender démarré : http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${port}${DRY_RUN ? '  (mode simulation, aucun mail réel)' : ''}`);
+    resolve(server);
+  });
 });
