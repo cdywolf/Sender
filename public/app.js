@@ -9,6 +9,7 @@ const api = async (url, opts = {}) => {
     body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body,
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 && !url.startsWith('/api/login')) location.replace('/login.html');
   if (!res.ok) throw new Error(data.message || `Erreur ${res.status}`);
   return data;
 };
@@ -714,6 +715,40 @@ $('#testSmtp').addEventListener('click', async () => {
     const r = await api('/api/settings/test', { method: 'POST' });
     toast(r.message, 'ok');
   } catch (err) { toast('Échec : ' + err.message, 'error'); }
+});
+
+// ---------- Sauvegarde (export / import) ----------
+$('#importBackup').addEventListener('click', () => $('#importFile').click());
+$('#importFile').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    const r = await api('/api/import', { method: 'POST', body: JSON.parse(await file.text()) });
+    await Promise.all([loadIdentities(), loadTemplates()]);
+    toast(`Importé : ${r.templates} modèle(s) et ${r.identities} identité(s).`, 'ok');
+  } catch (err) { toast('Import impossible : ' + err.message, 'error'); }
+});
+
+// ---------- Compte de connexion ----------
+api('/api/me').then((me) => {
+  if (!me.login) return;
+  $('#logout').classList.remove('hidden');
+  $('#accountCard').classList.remove('hidden');
+  $('#accountForm').user.value = me.user;
+}).catch(() => {});
+$('#logout').addEventListener('click', async () => {
+  await api('/api/logout', { method: 'POST' }).catch(() => {});
+  location.replace('/login.html');
+});
+$('#accountForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api('/api/account', { method: 'POST', body: { current: f.current.value, user: f.user.value, pass: f.pass.value } });
+    f.current.value = f.pass.value = '';
+    toast('Identifiants modifiés.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
 });
 
 // ---------- Démarrage ----------

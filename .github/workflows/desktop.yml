@@ -1,0 +1,57 @@
+# Construit les installeurs de l'application de bureau pour Windows, macOS et Linux.
+# - À chaque lancement manuel (onglet Actions → « Application de bureau » → Run workflow) :
+#   installeurs téléchargeables dans les « Artifacts » de l'exécution.
+# - À chaque tag v* (ex. v1.0.0) : publiés en plus dans une Release GitHub.
+name: Application de bureau
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['desktop/**', 'package.json', 'package-lock.json', '.github/workflows/desktop.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Construire l'installeur
+        run: npx electron-builder --publish never
+        env:
+          # Pas de certificat de signature : macOS et Windows afficheront un avertissement au premier lancement.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sender-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

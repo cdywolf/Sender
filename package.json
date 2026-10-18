@@ -1,17 +1,80 @@
 {
   "name": "sender",
   "version": "1.0.0",
-  "description": "Plateforme locale d'envoi de candidatures (CV) à des recruteurs, avec import CSV et éditeur HTML.",
-  "main": "server.js",
+  "description": "Application d'envoi de mails personnalisés (CSV, éditeur HTML, modèles), sur le web ou installée sur le bureau.",
+  "main": "desktop/main.js",
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "dry": "DRY_RUN=1 node server.js"
+    "dry": "DRY_RUN=1 node server.js",
+    "app": "electron .",
+    "dist": "electron-builder"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.6"
-  }
+  },
+  "devDependencies": {
+    "electron": "^38.8.6",
+    "electron-builder": "^26.15.3"
+  },
+  "author": {
+    "name": "Candy",
+    "email": "cdywolf@users.noreply.github.com"
+  },
+  "build": {
+    "appId": "fr.sender.app",
+    "productName": "Sender",
+    "files": [
+      "server.js",
+      "public/**",
+      "desktop/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "desktop/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Sender-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "desktop/icon.png",
+      "category": "public.app-category.productivity",
+      "artifactName": "Sender-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "desktop/icon.png",
+      "category": "Office",
+      "maintainer": "Candy <cdywolf@users.noreply.github.com>",
+      "artifactName": "Sender-${version}-${arch}.${ext}",
+      "executableName": "sender"
+    },
+    "publish": null
+  },
+  "desktopName": "sender.desktop"
 }

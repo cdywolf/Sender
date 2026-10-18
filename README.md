@@ -29,6 +29,32 @@ Pour essayer sans rien envoyer : `npm run dry` (mode simulation). Les mails sont
 en fichiers `.eml` dans `data/outbox/` ; vous pouvez les ouvrir avec Thunderbird ou Outlook pour voir le rendu exact.
 (Sous Windows, si `npm run dry` ne marche pas : `set DRY_RUN=1 && node server.js`.)
 
+## Application de bureau (Windows, macOS, Linux)
+
+Sender existe aussi en application à installer, qui fonctionne sans navigateur ni hébergement :
+tout (réglages, modèles, CV, historique) reste sur l'ordinateur.
+
+**Télécharger** : page [Releases](../../releases) du dépôt, puis
+- Windows : `Sender-Setup-x.y.z.exe`
+- macOS : `Sender-x.y.z-arm64.dmg` (puces Apple M1/M2/M3…) ou `Sender-x.y.z-x64.dmg` (Mac Intel)
+- Linux : `Sender-x.y.z-x86_64.AppImage` (toutes distributions) ou `Sender-x.y.z-amd64.deb` (Ubuntu, Debian)
+
+Au premier lancement, connectez-vous avec **candy / candy** (modifiable dans Réglages → Compte de connexion).
+
+L'application n'est pas signée par un certificat payant : Windows peut afficher « Windows a protégé votre ordinateur »
+(→ *Informations complémentaires* → *Exécuter quand même*) et macOS refuser de l'ouvrir
+(→ clic droit sur l'application → *Ouvrir*, ou `xattr -cr /Applications/Sender.app` dans le Terminal).
+
+**Retrouver ses modèles** : dans la version en ligne, *Réglages → Sauvegarde des modèles → Exporter*,
+puis dans l'application *Réglages → Sauvegarde des modèles → Importer un fichier…*. Modèles, identités, signatures
+et images sont repris à l'identique (les mots de passe SMTP sont à ressaisir).
+Pour que l'application soit livrée avec ces modèles, placez le fichier exporté dans `desktop/seed/sender-sauvegarde.json`
+avant de construire : il est importé au premier lancement.
+
+**Construire les installeurs** : onglet *Actions → Application de bureau → Run workflow* (fichiers dans les
+« Artifacts »), ou créer un tag `v1.0.0` pour les publier dans une Release. En local : `npm install` puis
+`npm run app` pour lancer, `npm run dist` pour l'installeur du système en cours.
+
 ## Configurer l'envoi (onglet « Réglages »)
 
 **Gmail** (recommandé) :
