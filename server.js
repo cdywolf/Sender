@@ -324,8 +324,9 @@ function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature, t
   const filled = fillVars(body, vars, true);
   const text = htmlToText(filled);
 
-  // Mode texte brut : aucun contenu HTML, uniquement la version texte. Les images intégrées
-  // sont ignorées (elles n'ont pas de sens en texte) ; les pièces jointes (CV…) sont conservées.
+  // Mode texte brut : aucun contenu HTML, uniquement la version texte. Les images insérées
+  // dans le message ne peuvent pas être affichées en ligne, mais elles sont jointes au mail
+  // en pièces jointes. Les pièces jointes (CV…) sont conservées dans les deux modes.
   const attachments = [];
   let finalHtml;
   if (!textOnly) {
@@ -333,6 +334,12 @@ function buildMessage(s, { subject, html, vars, to, cvIds, cc, bcc, signature, t
     const inlined = inlineImages(wrapped);
     finalHtml = inlined.html;
     attachments.push(...inlined.attachments);
+  } else {
+    // On récupère les images du message comme pièces jointes classiques (sans cid, donc non « inline »).
+    for (const img of inlineImages(filled).attachments) {
+      const { cid, ...rest } = img;
+      attachments.push(rest);
+    }
   }
   for (const id of cvIds || []) {
     const file = path.join(CV_DIR, path.basename(id));
