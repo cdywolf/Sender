@@ -9,7 +9,7 @@ Petite plateforme locale pour envoyer votre CV à des recruteurs, avec un mail p
 - **Pièces jointes** (CV, lettre de motivation…) ajoutées directement en écrivant le mail, bouton 📎 Joindre
 - **Identités** comme dans Thunderbird (nom, adresse, serveur d'envoi) à choisir dans « De », plus **Répondre à**, **Cc** et **Cci** pour chaque mail
 - Envoi d'un **mail de test** à soi-même, envoi groupé avec pause entre chaque mail, bouton « Arrêter »
-- **Modèles** de mail réutilisables et **historique** des envois (exportable en CSV)
+- **Modèles** de mail rangés par **catégorie**, avec **recherche**, **favoris** et **récents** pour retrouver le bon en un clic, et **historique** des envois (exportable en CSV)
 
 Tout tourne sur votre ordinateur : vos identifiants restent dans `data/settings.json`, en local.
 
