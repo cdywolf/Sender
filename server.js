@@ -308,9 +308,31 @@ app.get('/api/templates', (req, res) => res.json(readJson(TEMPLATES_FILE, [])));
 app.post('/api/templates', (req, res) => {
   const { name, html } = req.body || {};
   if (!name) return res.status(400).json({ message: 'Nom du modèle requis.' });
-  const list = readJson(TEMPLATES_FILE, []).filter((t) => t.name !== name);
+  const all = readJson(TEMPLATES_FILE, []);
+  const old = all.find((t) => t.name === name) || {};
+  const list = all.filter((t) => t.name !== name);
   const fields = Object.fromEntries(['subject', 'identitySelect', 'fromName', 'fromEmail', 'replyTo', 'cc', 'bcc'].map((k) => [k, String(req.body[k] || '')]));
-  list.push({ name, ...fields, html: html || '', updatedAt: new Date().toISOString() });
+  // Catégorie et favori : gardés de l'ancienne version du modèle s'ils ne sont pas renvoyés.
+  const category = req.body.category !== undefined ? String(req.body.category).trim() : old.category || '';
+  list.push({ name, ...fields, html: html || '', category, favorite: !!old.favorite, usedAt: old.usedAt, updatedAt: new Date().toISOString() });
+  writeJson(TEMPLATES_FILE, list);
+  res.json(list);
+});
+// Rangement d'un modèle sans toucher à son contenu : renommer, catégorie, favori, dernière utilisation.
+app.patch('/api/templates/:name', (req, res) => {
+  const list = readJson(TEMPLATES_FILE, []);
+  const t = list.find((x) => x.name === req.params.name);
+  if (!t) return res.status(404).json({ message: 'Modèle introuvable.' });
+  const b = req.body || {};
+  if (b.newName !== undefined) {
+    const newName = String(b.newName).trim();
+    if (!newName) return res.status(400).json({ message: 'Nom du modèle requis.' });
+    if (newName !== t.name && list.some((x) => x.name === newName)) return res.status(400).json({ message: `Un modèle « ${newName} » existe déjà.` });
+    t.name = newName;
+  }
+  if (b.category !== undefined) t.category = String(b.category).trim();
+  if (b.favorite !== undefined) t.favorite = !!b.favorite;
+  if (b.used) t.usedAt = new Date().toISOString();
   writeJson(TEMPLATES_FILE, list);
   res.json(list);
 });

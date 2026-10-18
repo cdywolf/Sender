@@ -559,41 +559,210 @@ function renderPreview() {
 $('#previewRecipient').addEventListener('change', renderPreview);
 
 // ---------- Modèles ----------
+// Bibliothèque : recherche, favoris, récents et catégories, pour trouver un modèle en un coup d'œil.
 let templates = [];
+let currentTemplate = store.get('currentTemplate', '');
+let tplFilter = store.get('tplFilter', 'all');
+const NO_CATEGORY = 'Sans catégorie';
+const catOf = (t) => (t.category || '').trim() || NO_CATEGORY;
+// Une couleur stable par catégorie.
+const CAT_COLORS = ['blue', 'teal', 'violet', 'amber', 'rose', 'green', 'orange', 'cyan'];
+const catColor = (c) => {
+  if (c === NO_CATEGORY) return 'gray';
+  let h = 0;
+  for (const ch of c) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return CAT_COLORS[h % CAT_COLORS.length];
+};
+const plain = (html) => { const d = document.createElement('div'); d.innerHTML = String(html || '').replace(/<(br|\/p|\/div|\/li|\/h\d)\b[^>]*>/gi, '$& '); return (d.textContent || '').replace(/\s+/g, ' ').trim(); };
+const norm = (v) => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const RECENT_DAYS = 30;
+
 async function loadTemplates(list) {
   templates = list || (await api('/api/templates'));
-  const sel = $('#templateSelect');
-  const cur = sel.value;
-  sel.innerHTML = '<option value=""></option>' + templates.map((t) => `<option>${escapeHtml(t.name)}</option>`).join('');
-  sel.value = templates.some((t) => t.name === cur) ? cur : '';
-  $('#deleteTemplate').classList.toggle('hidden', !sel.value);
+  if (currentTemplate && !templates.some((t) => t.name === currentTemplate)) setCurrentTemplate('');
+  $('#templateCount').textContent = templates.length;
+  $('#categoryList').innerHTML = [...new Set(templates.map((t) => (t.category || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'fr')).map((c) => `<option value="${escapeHtml(c)}">`).join('');
+  renderTemplates();
 }
-$('#templateSelect').addEventListener('change', (e) => {
-  const t = templates.find((x) => x.name === e.target.value);
-  $('#deleteTemplate').classList.toggle('hidden', !t);
+
+function setCurrentTemplate(name) {
+  currentTemplate = name;
+  store.set('currentTemplate', name);
+  $('#currentTemplate').innerHTML = name
+    ? `Modèle chargé : <strong>${escapeHtml(name)}</strong>`
+    : 'Nouveau message (aucun modèle chargé)';
+  $('#updateTemplate').classList.toggle('hidden', !name);
+}
+
+function renderTemplates() {
+  // Filtres : Tous, Favoris, Récents, puis une pastille par catégorie.
+  const cats = new Map();
+  for (const t of templates) cats.set(catOf(t), (cats.get(catOf(t)) || 0) + 1);
+  const recentCut = Date.now() - RECENT_DAYS * 864e5;
+  const isRecent = (t) => t.usedAt && Date.parse(t.usedAt) > recentCut;
+  const filters = [
+    { key: 'all', label: 'Tous', count: templates.length },
+    { key: 'fav', label: '★ Favoris', count: templates.filter((t) => t.favorite).length },
+    { key: 'recent', label: '🕘 Récents', count: templates.filter(isRecent).length },
+    ...[...cats].sort((a, b) => (a[0] === NO_CATEGORY) - (b[0] === NO_CATEGORY) || a[0].localeCompare(b[0], 'fr'))
+      .map(([c, n]) => ({ key: 'cat:' + c, label: c, count: n, color: catColor(c) })),
+  ];
+  if (!filters.some((f) => f.key === tplFilter)) tplFilter = 'all';
+  $('#templateFilters').innerHTML = filters.map((f) =>
+    `<button class="chip${f.key === tplFilter ? ' active' : ''}" role="tab" aria-selected="${f.key === tplFilter}" data-filter="${escapeHtml(f.key)}">` +
+    `${f.color ? `<span class="dot c-${f.color}"></span>` : ''}${escapeHtml(f.label)} <span class="chip-n">${f.count}</span></button>`).join('');
+
+  const q = norm($('#templateSearch').value.trim());
+  let list = templates.filter((t) => {
+    if (tplFilter === 'fav' && !t.favorite) return false;
+    if (tplFilter === 'recent' && !isRecent(t)) return false;
+    if (tplFilter.startsWith('cat:') && catOf(t) !== tplFilter.slice(4)) return false;
+    return !q || norm([t.name, t.subject, t.category, plain(t.html)].join(' ')).includes(q);
+  });
+  // Favoris d'abord, puis les plus récemment utilisés, puis par nom.
+  const time = (t) => Date.parse(t.usedAt || t.updatedAt || 0) || 0;
+  list.sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0)
+    || (tplFilter === 'recent' ? time(b) - time(a) : 0)
+    || a.name.localeCompare(b.name, 'fr'));
+
+  const empty = $('#noTemplates');
+  empty.classList.toggle('hidden', list.length > 0);
+  empty.textContent = templates.length
+    ? 'Aucun modèle ne correspond à cette recherche.'
+    : 'Aucun modèle pour l\'instant. Écrivez un message puis cliquez sur « Enregistrer comme modèle ».';
+
+  // Avec « Tous » et sans recherche : un groupe par catégorie, pour une vue bien rangée.
+  const grouped = tplFilter === 'all' && !q && cats.size > 1;
+  const card = (t) => {
+    const c = catOf(t);
+    return `<article class="tpl-card${t.name === currentTemplate ? ' current' : ''}" data-name="${escapeHtml(t.name)}" tabindex="0" title="Cliquer pour utiliser ce modèle">
+      <div class="tpl-top">
+        <span class="tag c-${catColor(c)}">${escapeHtml(c)}</span>
+        <button class="star${t.favorite ? ' on' : ''}" data-fav="${escapeHtml(t.name)}" title="${t.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}" aria-label="Favori">${t.favorite ? '★' : '☆'}</button>
+      </div>
+      <h3>${escapeHtml(t.name)}</h3>
+      <p class="tpl-subject">${escapeHtml(t.subject || '(sans objet)')}</p>
+      <p class="tpl-excerpt">${escapeHtml(plain(t.html).slice(0, 140))}</p>
+      <div class="tpl-actions">
+        <button class="link" data-edit-tpl="${escapeHtml(t.name)}">Renommer / ranger</button>
+        <button class="link danger" data-del-tpl="${escapeHtml(t.name)}">Supprimer</button>
+      </div>
+    </article>`;
+  };
+  if (grouped) {
+    const groups = new Map();
+    for (const t of list) { const c = catOf(t); if (!groups.has(c)) groups.set(c, []); groups.get(c).push(t); }
+    const favs = list.filter((t) => t.favorite);
+    $('#templateGrid').innerHTML =
+      (favs.length ? `<h4 class="tpl-group">★ Favoris</h4><div class="tpl-cards">${favs.map(card).join('')}</div>` : '') +
+      [...groups].sort((a, b) => (a[0] === NO_CATEGORY) - (b[0] === NO_CATEGORY) || a[0].localeCompare(b[0], 'fr'))
+        .map(([c, ts]) => {
+          const rest = ts.filter((t) => !t.favorite);
+          return rest.length ? `<h4 class="tpl-group"><span class="dot c-${catColor(c)}"></span>${escapeHtml(c)}</h4><div class="tpl-cards">${rest.map(card).join('')}</div>` : '';
+        }).join('');
+  } else {
+    $('#templateGrid').innerHTML = list.length ? `<div class="tpl-cards">${list.map(card).join('')}</div>` : '';
+  }
+}
+
+$('#templateSearch').addEventListener('input', renderTemplates);
+$('#templateFilters').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-filter]');
+  if (!b) return;
+  tplFilter = b.dataset.filter;
+  store.set('tplFilter', tplFilter);
+  renderTemplates();
+});
+
+async function useTemplate(name) {
+  const t = templates.find((x) => x.name === name);
   if (!t) return;
   HEADER_FIELDS.forEach((id) => { $('#' + id).value = t[id] || ''; });
   if (!$('#identitySelect').value) $('#identitySelect').value = '';
   toggleCustomFrom();
   setHtml(t.html);
   if (mode === 'html') source.value = formatHtml(t.html);
-  toast(`Modèle « ${t.name} » chargé.`);
+  if (mode === 'preview') renderPreview();
+  setCurrentTemplate(t.name);
+  toast(`Modèle « ${t.name} » chargé.`, 'ok');
+  loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'PATCH', body: { used: true } }).catch(() => templates));
+}
+
+$('#templateGrid').addEventListener('click', async (e) => {
+  const fav = e.target.closest('[data-fav]');
+  const edit = e.target.closest('[data-edit-tpl]');
+  const del = e.target.closest('[data-del-tpl]');
+  try {
+    if (fav) {
+      const t = templates.find((x) => x.name === fav.dataset.fav);
+      return loadTemplates(await api('/api/templates/' + encodeURIComponent(t.name), { method: 'PATCH', body: { favorite: !t.favorite } }));
+    }
+    if (edit) {
+      const t = templates.find((x) => x.name === edit.dataset.editTpl);
+      const r = await askTemplate('Renommer / ranger le modèle', t.name, t.category || '');
+      if (!r) return;
+      await loadTemplates(await api('/api/templates/' + encodeURIComponent(t.name), { method: 'PATCH', body: { newName: r.name, category: r.category } }));
+      if (currentTemplate === t.name) setCurrentTemplate(r.name);
+      return toast('Modèle mis à jour.', 'ok');
+    }
+    if (del) {
+      const name = del.dataset.delTpl;
+      if (await askConfirm(`Supprimer le modèle « ${name} » ?`, 'Supprimer')) {
+        await loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' }));
+        toast('Modèle supprimé.');
+      }
+      return;
+    }
+    const c = e.target.closest('.tpl-card');
+    if (c) useTemplate(c.dataset.name);
+  } catch (err) { toast(err.message, 'error'); }
 });
+$('#templateGrid').addEventListener('keydown', (e) => {
+  const c = e.target.closest('.tpl-card');
+  if (c && e.target === c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); useTemplate(c.dataset.name); }
+});
+
+// Boîte « nom + catégorie » pour enregistrer ou ranger un modèle.
+function askTemplate(title, name = '', category = '') {
+  return new Promise((resolve) => {
+    const box = $('#tplDialog');
+    const f = $('#tplForm');
+    $('#tplDialogTitle').textContent = title;
+    f.name.value = name;
+    f.category.value = category;
+    box.classList.remove('hidden');
+    f.name.focus();
+    f.name.select();
+    const close = (r) => { box.classList.add('hidden'); f.onsubmit = $('#tplCancel').onclick = box.onkeydown = null; resolve(r); };
+    f.onsubmit = (e) => { e.preventDefault(); close({ name: f.name.value.trim(), category: f.category.value.trim() }); };
+    $('#tplCancel').onclick = () => close(null);
+    box.onkeydown = (e) => { if (e.key === 'Escape') close(null); };
+  });
+}
+
+const templateBody = (name, category) => ({ name, category, html: getHtml(), ...Object.fromEntries(HEADER_FIELDS.map((id) => [id, $('#' + id).value])) });
 $('#saveTemplate').addEventListener('click', async () => {
-  const name = await askText('Nom du modèle :', $('#templateSelect').value || '');
-  if (!name) return;
-  await loadTemplates(await api('/api/templates', { method: 'POST', body: { name, html: getHtml(), ...Object.fromEntries(HEADER_FIELDS.map((id) => [id, $('#' + id).value])) } }));
-  $('#templateSelect').value = name;
-  $('#deleteTemplate').classList.remove('hidden');
-  toast('Modèle enregistré.', 'ok');
+  const cur = templates.find((t) => t.name === currentTemplate);
+  const r = await askTemplate('Enregistrer comme modèle', '', cur ? cur.category || '' : '');
+  if (!r || !r.name) return;
+  if (templates.some((t) => t.name === r.name) && !(await askConfirm(`Un modèle « ${r.name} » existe déjà. Le remplacer ?`, 'Remplacer'))) return;
+  try {
+    await loadTemplates(await api('/api/templates', { method: 'POST', body: templateBody(r.name, r.category) }));
+    setCurrentTemplate(r.name);
+    renderTemplates();
+    toast('Modèle enregistré.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
 });
-$('#deleteTemplate').addEventListener('click', async () => {
-  const name = $('#templateSelect').value;
-  if (name && (await askConfirm(`Supprimer le modèle « ${name} » ?`, 'Supprimer'))) {
-    $('#templateSelect').value = '';
-    loadTemplates(await api('/api/templates/' + encodeURIComponent(name), { method: 'DELETE' }));
-  }
+$('#updateTemplate').addEventListener('click', async () => {
+  const t = templates.find((x) => x.name === currentTemplate);
+  if (!t || !(await askConfirm(`Remplacer le contenu du modèle « ${t.name} » par le message actuel ?`, 'Mettre à jour'))) return;
+  try {
+    await loadTemplates(await api('/api/templates', { method: 'POST', body: templateBody(t.name, t.category || '') }));
+    toast('Modèle mis à jour.', 'ok');
+  } catch (err) { toast(err.message, 'error'); }
 });
+setCurrentTemplate(currentTemplate);
 
 // ---------- Envoi ----------
 let currentJob = null;

@@ -24,7 +24,7 @@
     <div class="grid">
       <div class="col">
         <div class="card">
-          <h2>1. Destinataires <span id="recipientCount" class="pill">0</span></h2>
+          <h2><span class="step">1</span> Destinataires <span id="recipientCount" class="pill">0</span></h2>
           <label class="drop" id="csvDrop">
             <input type="file" id="csvInput" accept=".csv,text/csv,.txt" hidden>
             <strong>Importer un CSV</strong>
@@ -48,16 +48,28 @@
           </div>
         </div>
 
+        <div class="card">
+          <h2><span class="step">2</span> Choisir un modèle <span id="templateCount" class="pill">0</span></h2>
+          <div class="tpl-search">
+            <span class="tpl-search-icon" aria-hidden="true">🔍</span>
+            <input type="search" id="templateSearch" placeholder="Rechercher un modèle (nom, objet, contenu…)" aria-label="Rechercher un modèle">
+          </div>
+          <div id="templateFilters" class="chips" role="tablist" aria-label="Filtrer les modèles"></div>
+          <div id="templateGrid" class="tpl-grid"></div>
+          <p id="noTemplates" class="muted center small hidden"></p>
+        </div>
+
       </div>
 
       <div class="col">
         <div class="card">
-          <h2>2. Message</h2>
-          <div class="row wrap">
-            <label for="templateSelect" class="small muted">Modèle</label>
-            <select id="templateSelect"><option value=""></option></select>
-            <button class="btn ghost" id="saveTemplate">Enregistrer comme modèle</button>
-            <button class="btn ghost danger hidden" id="deleteTemplate">Supprimer</button>
+          <h2><span class="step">3</span> Message</h2>
+          <div class="current-tpl">
+            <span id="currentTemplate" class="muted small">Nouveau message (aucun modèle chargé)</span>
+            <span class="row">
+              <button class="btn ghost small-btn hidden" id="updateTemplate">Mettre à jour le modèle</button>
+              <button class="btn ghost small-btn" id="saveTemplate">＋ Enregistrer comme modèle</button>
+            </span>
           </div>
 
           <div class="headers">
@@ -127,7 +139,7 @@
         </div>
 
         <div class="card">
-          <h2>3. Envoi</h2>
+          <h2><span class="step">4</span> Envoi</h2>
           <div class="row wrap">
             <label for="testTo" class="small muted">Adresse pour le test</label>
             <input type="email" id="testTo">
@@ -279,6 +291,18 @@
       <button class="btn primary" id="dialogOk">OK</button>
     </div>
   </div>
+</div>
+<div id="tplDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tplDialogTitle">
+  <form class="dialog form" id="tplForm">
+    <p id="tplDialogTitle">Enregistrer comme modèle</p>
+    <label>Nom du modèle <input name="name" required autocomplete="off"></label>
+    <label>Catégorie <input name="category" list="categoryList" placeholder="ex. Relance, Premier contact, Devis…" autocomplete="off"></label>
+    <datalist id="categoryList"></datalist>
+    <div class="row end">
+      <button class="btn ghost" type="button" id="tplCancel">Annuler</button>
+      <button class="btn primary" type="submit">Enregistrer</button>
+    </div>
+  </form>
 </div>
 <div id="toast" class="toast hidden"></div>
 <script src="app.js"></script>
