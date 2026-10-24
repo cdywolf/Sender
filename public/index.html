@@ -260,10 +260,15 @@
     <div class="card narrow">
       <h2>Sauvegarde des modèles</h2>
       <p class="muted small">Exportez vos modèles de mail, vos identités (avec leurs signatures) et les images qu'ils contiennent
-        dans un fichier, puis importez-le sur un autre ordinateur ou dans l'application de bureau pour les retrouver à l'identique.
-        Les mots de passe ne sont jamais exportés.</p>
+        dans un fichier, puis importez-le sur un autre ordinateur ou dans l'application de bureau pour les retrouver à l'identique.</p>
+      <label class="row small" style="gap:8px;align-items:center">
+        <input type="checkbox" id="exportPasswords" checked style="flex:none;width:auto">
+        Inclure les mots de passe d'envoi (identités et serveur principal), pour ne pas avoir à les ressaisir
+      </label>
+      <p id="exportPasswordsWarn" class="muted small">⚠️ Les mots de passe sont alors lisibles dans le fichier : gardez-le en lieu sûr,
+        ne l'envoyez pas par mail et supprimez-le après l'import.</p>
       <div class="row">
-        <a class="btn ghost" id="exportBackup" href="/api/export" download>Exporter</a>
+        <a class="btn ghost" id="exportBackup" href="/api/export?passwords=1" download>Exporter</a>
         <button class="btn ghost" type="button" id="importBackup">Importer un fichier…</button>
         <input type="file" id="importFile" accept=".json,application/json" class="hidden">
       </div>

@@ -5,3 +5,6 @@ pour que l'application installée démarre avec ces modèles, identités et imag
 
 Ils ne sont importés qu'au premier lancement, quand l'application n'a encore aucun modèle :
 rien n'est écrasé chez quelqu'un qui l'utilise déjà.
+
+⚠️ Utilisez ici un export **sans** mots de passe (case « Inclure les mots de passe d'envoi » décochée) :
+ce fichier est publié avec le code et l'application, tout le monde pourrait les lire.
