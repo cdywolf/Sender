@@ -887,6 +887,10 @@ $('#testSmtp').addEventListener('click', async () => {
 });
 
 // ---------- Sauvegarde (export / import) ----------
+$('#exportPasswords').addEventListener('change', (e) => {
+  $('#exportBackup').href = '/api/export' + (e.target.checked ? '?passwords=1' : '');
+  $('#exportPasswordsWarn').classList.toggle('hidden', !e.target.checked);
+});
 $('#importBackup').addEventListener('click', () => $('#importFile').click());
 $('#importFile').addEventListener('change', async (e) => {
   const file = e.target.files[0];

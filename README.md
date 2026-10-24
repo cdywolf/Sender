@@ -47,7 +47,9 @@ L'application n'est pas signée par un certificat payant : Windows peut afficher
 
 **Retrouver ses modèles** : dans la version en ligne, *Réglages → Sauvegarde des modèles → Exporter*,
 puis dans l'application *Réglages → Sauvegarde des modèles → Importer un fichier…*. Modèles, identités, signatures
-et images sont repris à l'identique (les mots de passe SMTP sont à ressaisir).
+et images sont repris à l'identique. Avec la case « Inclure les mots de passe d'envoi » (cochée par défaut),
+les mots de passe des identités et du serveur principal sont aussi repris : rien à ressaisir. Ils sont alors lisibles
+dans le fichier, gardez-le en lieu sûr et supprimez-le après l'import.
 Pour que l'application soit livrée avec ces modèles, placez le fichier exporté dans `desktop/seed/sender-sauvegarde.json`
 avant de construire : il est importé au premier lancement.
 

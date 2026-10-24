@@ -345,18 +345,21 @@ app.delete('/api/templates/:name', (req, res) => {
 // ---------- Sauvegarde : export / import ----------
 // Un seul fichier JSON avec les modèles, les identités et les images qu'ils utilisent,
 // pour retrouver les mêmes modèles à l'identique sur un autre ordinateur ou dans l'application.
-// Les mots de passe SMTP ne sont jamais exportés.
+// Avec ?passwords=1, les mots de passe SMTP (identités et serveur principal) sont inclus,
+// en clair : le fichier doit alors être gardé comme un mot de passe.
 app.get('/api/export', (req, res) => {
+  const withPasswords = req.query.passwords === '1';
   const templates = readJson(TEMPLATES_FILE, []);
-  const identities = readIdentities().map((i) => ({ ...i, smtp: i.smtp ? { ...i.smtp, pass: '' } : null }));
-  const { pass, ...settings } = getSettings();
+  const identities = readIdentities().map((i) => ({ ...i, smtp: i.smtp ? { ...i.smtp, pass: withPasswords ? i.smtp.pass || '' : '' } : null }));
+  const { pass, ...rest } = getSettings();
+  const settings = withPasswords ? { ...rest, pass: pass || '' } : rest;
   const used = JSON.stringify([templates, identities]);
   const images = {};
   for (const name of fs.readdirSync(IMG_DIR)) {
     if (used.includes('/images/' + name)) images[name] = fs.readFileSync(path.join(IMG_DIR, name)).toString('base64');
   }
   const stamp = new Date().toISOString().slice(0, 10);
-  res.set('Content-Disposition', `attachment; filename="sender-sauvegarde-${stamp}.json"`);
+  res.set('Content-Disposition', `attachment; filename="sender-sauvegarde${withPasswords ? '-avec-mots-de-passe' : ''}-${stamp}.json"`);
   res.json({ app: 'sender', version: 1, exportedAt: new Date().toISOString(), templates, identities, settings, images });
 });
 
@@ -374,13 +377,17 @@ function importBackup(b) {
   const ids = Array.isArray(b.identities) ? b.identities.filter((i) => i && i.id) : [];
   const merged = current.map((i) => {
     const n = ids.find((x) => x.id === i.id);
-    // On garde le mot de passe SMTP déjà saisi sur cet ordinateur.
-    return n ? { ...n, smtp: n.smtp ? { ...n.smtp, pass: (i.smtp && i.smtp.pass) || '' } : null } : i;
+    // Mot de passe du fichier s'il y en a un, sinon celui déjà saisi sur cet ordinateur.
+    return n ? { ...n, smtp: n.smtp ? { ...n.smtp, pass: n.smtp.pass || (i.smtp && i.smtp.pass) || '' } : null } : i;
   });
   for (const n of ids) if (!current.some((i) => i.id === n.id)) merged.push(n);
   writeJson(IDENTITIES_FILE, merged);
-  // Réglages : seulement s'il n'y en a pas encore ici (le mot de passe n'est jamais dans le fichier).
-  if (b.settings && !fs.existsSync(SETTINGS_FILE)) writeJson(SETTINGS_FILE, { ...b.settings, pass: '' });
+  // Réglages : seulement s'il n'y en a pas encore ici ; le mot de passe du fichier complète un mot de passe manquant.
+  if (b.settings && !fs.existsSync(SETTINGS_FILE)) writeJson(SETTINGS_FILE, { ...b.settings, pass: b.settings.pass || '' });
+  else if (b.settings && b.settings.pass) {
+    const local = readJson(SETTINGS_FILE, {});
+    if (!local.pass) writeJson(SETTINGS_FILE, { ...local, pass: b.settings.pass });
+  }
   return { templates: incoming.length, identities: ids.length };
 }
 
@@ -592,8 +599,13 @@ app.use((err, req, res, next) => {
 });
 
 // L'application de bureau attend ce serveur (port choisi automatiquement avec PORT=0).
-module.exports = new Promise((resolve) => {
-  const server = app.listen(PORT, HOST, () => {
+module.exports = new Promise((resolve, reject) => {
+  const server = app.listen(PORT, HOST, (err) => {
+    if (err) {
+      console.error(`Impossible de démarrer sur le port ${PORT} : ${err.code === 'EADDRINUSE' ? 'déjà utilisé par un autre programme' : err.message}.`);
+      if (require.main === module) process.exit(1);
+      return reject(err);
+    }
     const port = server.address().port;
     console.log(`Sender démarré : http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${port}${DRY_RUN ? '  (mode simulation, aucun mail réel)' : ''}`);
     resolve(server);
